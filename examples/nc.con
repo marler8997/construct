@@ -1,0 +1,72 @@
+
+function void usage {
+  call write("Connect-Mode: nc [-options] host port\N")
+  call write("Listen-Mode : nc [-options] -l -p port\N")
+  call write("  -o | --local-host host  Bind the local socket to this host/ip\N")
+  call write("  -p | --port port        Bind the local socket to the given port\N")
+  call write("  -l | --listen           Listen mode\N")
+  call write("  -b | --buffer-size size Use the given buffer size\N")
+}
+
+decl uword bufferSize 2048
+decl Socket connectedSocket void
+
+function int main ([][]utf8 args) {
+  if ((length args) <= 1) {
+    call usage()
+    return 0
+  }
+
+  decl []utf8 localHostString void
+  decl ushort localPort void
+  decl bool listenMode void
+
+  call getopt(ref args,
+    "o|local-host", ref localHostString,
+    "p|port, ref localPort,
+    "l|listen", ref listenMode,
+    "b|buffer-size", ref bufferSize)
+
+  if listenMode {
+ 
+    if (args.length != 1) {
+      call writef("listen mode requires 0 command line arguments but got %s\N", args.length - 1)
+      return 1
+    }
+ 
+    decl auto localAddress
+    if localHostString {
+      set localAddress call CreateAddress(.Any, localPort) // .Any means to use the Any constant defined in this Argument Context
+    } else {
+      throw "local host string not implemented"
+    }
+
+    decl auto listenSocket call Socket(localAddress.family, .Stream, .Tcp) // .Stream and .Tcp means to use the Stream/Tcp constants defined in the function context
+
+    call bind(listenSocket, localAddress)
+    call listen(listenSocket, 1)
+
+    set connectedSocket call accept(listenSocket)
+  } else {
+
+    if (args.length != 3) {
+      call writef("connect mode requires 2 command line arguments but got %s\N", args.length - 1)
+      return 1
+    }
+
+    decl auto connectorString args[1]
+    decl auto remotePort call parse(ushort, args[2])
+
+    decl SocketConnector connector void
+    decl auto ipOrHost call parseConnector(connectorString, connector)
+    decl audo address call addressFromIPOrHost(ipOrHost, remotePort)
+
+    set connectedSocket call Socket(address.family, .Stream, .Tcp)
+
+    
+
+  }
+
+}
+				       
+
