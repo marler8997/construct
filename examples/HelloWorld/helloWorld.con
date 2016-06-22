@@ -1,0 +1,55 @@
+/*
+
+Grammar
+====================================================================
+constructs ::= (name construct-params (';' | '{' constructs '}') )*
+construct-params ::= (string | name '=' params | list | param-construct )*
+params ::= construct-params | '{' constructs '}'
+list ::= '(' ( params | '{' constructs '}' ) * ')'
+param-construct ::= '/' name params '\'?
+
+OldGrammar
+====================================================================
+constructs ::= (name params (';' | '{' constructs '}') )*
+params ::= (value | name '=' value | list | param-construct )*
+list ::= '(' ( params | '{' constructs '}' ) * ')'
+param-construct ::= '/' name params  '\'?
+*/
+
+//
+// NOTE: /string == /array/const char
+//
+import std.procedural;
+import std.io;
+function main int (args/string)
+{
+  write "Hello, World!";
+  return 0;
+}
+function add int ((x/const int)(y/const int))
+{
+  return/add x y;
+  // return {add x y}
+  // 
+}
+
+/*
+function safeDivide int ((x)(y)) guards=
+{
+  notZero y
+}{
+  // no implementation, implemented by backend
+}
+*/
+
+/*
+construct definitions
+==========================
+I could have different kinds of constructs.
+- Constructs that have subconstructs or not.
+- Constructs that return something or not
+- etc.
+
+construct function returnType (arguments .list ) constructBlock
+
+*/

@@ -1,0 +1,13 @@
+construct write
+{
+  input {
+    format : string,
+    args : ...,
+    appendNewline = false,
+  }
+}
+
+construct writeln
+{
+  forward(write, appendNewline=true);
+}

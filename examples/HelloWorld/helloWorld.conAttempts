@@ -1,0 +1,193 @@
+/*
+construct grammar
+==================================
+root-construct ::= ( (block-construct) | construct  ';'  )*
+construct ::= comment* name parameters
+block-construct ::= comment* name parameters '{' parameters '}'
+comment ::= '//' 'any character except \n' '\n' | '/*' 'any characters except */' '*/'
+parameters ::=  ( comment* parameter )*
+parameter ::= '(' (construct|block-construct) ')' | keyword | number | string | list
+list ::= '[' root-construct '];
+
+
+
+There are 2 contexts:
+1. Construct Context
+2. Parameter Context
+
+Initially, code begins in the "Construct Context".
+
+Any comments that occur in the construct context, will be
+attached to the next construct.
+
+After any comments, the construct name is expected.
+After the construct name, the "Parameter Context" begins.
+
+The "Parameter Context"
+
+*/
+
+  
+//
+// keywords:
+//  int  : signed word
+//  uint : unsigned word
+//  void : no type
+//
+// Unquoted string are supported
+//
+
+
+// ; means the end of a construct
+import std.procedural;
+
+// [] denotes a list
+// If a construct starts a block with brace '{', then the
+// construct ends with the closing brace
+function main int [] {
+  import std.io;
+  write "Hello, World!";
+}
+
+
+function add int [param x; param y;] {
+  return (plus x y);
+}
+
+/*
+Attempt 2
+
+constructs ::= | name parameter* (';' name parameter*)*
+parameter ::= keyword | number | '"' string '"' | simple-string | construct | '{' constructs '}'
+simple_string ::= "'" ([a-z._])*
+*/
+
+import 'std.procedural;
+
+// [] denotes a list
+// If a construct starts a block with brace '{', then the
+// construct ends with the closing brace
+function 'main int param 'args array string {
+  import 'std.io;
+  write "Hello, World!";
+}
+
+
+function add int [param x; param y;] {
+  return (plus x y);
+}
+
+
+/*
+Attempt 3 (lisp version)
+
+constructs ::= | name parameter* (';' name parameter*)*
+parameter ::= keyword | number | '"' string '"' | simple-string | construct | '{' constructs '}'
+simple_string ::= "'" ([a-z._])*
+*/
+
+(import std.procedural)
+
+// [] denotes a list
+// If a construct starts a block with brace '{', then the
+// construct ends with the closing brace
+(function 'main 'int param 'args array string {
+  import 'std.io;
+  write "Hello, World!";
+}
+
+
+function add int [param x; param y;] {
+  return (plus x y);
+}
+
+
+
+
+
+
+
+//
+// keywords:
+//  int  : signed word
+//  uint : unsigned word
+//  void : no type
+//
+// Unquoted string are supported
+//
+
+
+// ; means the end of a construct
+(import std.procedural)
+(function main (int) (
+                      (lenarray ))
+          (import std.io)
+          (write "Hello, World!")
+          )
+
+(function add (int) (
+
+
+// [] denotes a list
+// If a construct starts a block with brace '{', then the
+// construct ends with the closing brace
+function main int [] {
+  import std.io;
+  write "Hello, World!";
+}
+
+
+function add int [param x; param y;] {
+  return (plus x y);
+}
+
+// ; means the end of a construct
+(import std.procedural)
+(function main int
+  (import std.io)
+  (write "Hello, World!")
+)
+
+/*
+//(function add int [x int,y int]
+
+
+// [] denotes a list
+// If a construct starts a block with brace '{', then the
+// construct ends with the closing brace
+function main int [] {
+  import std.io;
+  write "Hello, World!";
+}
+
+
+function add int [param x; param y;] {
+  return (plus x y);
+}
+
+*/
+
+/*
+constructs ::= (name ('(' params ')')? ('{' constructs '}')? )*
+params ::= (keyword | string | list)*
+list ::= '(' params ')'
+string ::= unquoted-string | '"' quoted-string '"'
+*/
+
+import (std.procedural)
+
+function (main int (args (lengthArray (const char)))) {
+  import (std.io)
+  write("Hello, World!")
+  return (0)
+}
+
+
+
+function (add int ((x (const int))(y (const int))) ) {
+  return (+ x y)  
+}
+//construct (function
+
+
+
