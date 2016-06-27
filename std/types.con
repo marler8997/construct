@@ -1,0 +1,29 @@
+
+// keywords:
+//  type : any type
+//  int  : a signed number with the same bit-width as a pointer
+//  uint : an unsigned number with the same bit-width as a pointer
+
+
+
+// TODO: instead of using comments to describe constructs, implement the doc "..."; construct
+
+//
+// Construct Definition Syntax
+//
+// construct <name> (<params>...) (<named-params>...)
+//  [is=<type>]
+//  ;
+//
+defcon array (type) evaluatesTo=type;
+
+
+
+//defcon enum (name symbol, values /list );
+
+
+/*
+defcon struct semantics={
+  
+};
+*/

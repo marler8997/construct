@@ -1,127 +1,206 @@
 module construct.ir;
 
-mixin template IRLoaderEntryPoint(string irLoaderFile = __FILE__)
-{
-  import std.stdio : writeln, writefln, stdout;
-  import std.file  : exists, mkdir, baseName, dirName, buildNormalizedPath;
-  import std.array : appender;
-  import backend : emit;
-  
-  void usage(string program)
-  {
-    writefln("Usage: %s", program.baseName);
-  }
-  int main(string[] args)
-  {
-    auto code = appender!(Construct[])();
-
-    string program = args[0];
-    args = args[1..$];
-    
-    if(args.length > 0) {
-      usage(program);
-      writeln();
-      writeln("Error: too many command line arguments");
-      return 1;
-    }
-
-    string outputDir = buildNormalizedPath(irLoaderFile.dirName, "obj");
-    if(!exists(outputDir)) {
-      mkdir(outputDir);
-    }
-    
-    writefln("[DEBUG] Loading constructs from '%s'...", irLoaderFile);
-    stdout.flush();
-    loadCode(code);
-    writeln("[DEBUG] Done loading constructs. Emitting code...");
-    stdout.flush();
-    {
-      auto result = emit(outputDir, irLoaderFile, code);
-      if(result == 0) {
-        writeln("[DEBUG] Done emitting code, Success.");
-      }
-      return result;
-    }
-  }
-}
-
-import std.stdio  : File, Exception;
+import std.stdio  : File, Exception, writeln, writefln, stdout;
 import std.array  : Appender, appender;
 import std.string : format;
 import std.format : formattedWrite;
 import std.conv   : to;
 
-class InvalidConstructException: Exception
-{
-  this(string msg)
-  {
-    super(msg);
-  }
-}
+import construct.backendIR : BackendConstruct;
 
-/*
-struct ConstructCode
-{
-  Appender!(Construct[]) constructs;
-  this() {
-    constructs = appender!(Construct[])();
-  }
-  void put(Construct construct)
-  {
-    constructs.put(construct);
-  }
-}
-*/
+enum PrimitiveTypeEnum {
+  anything,
+  
+  type,
 
-class ConstructObject {
-  abstract void toString(scope void delegate(const(char)[]) sink) const;
-  abstract bool equals(const(ConstructObject) otherObj) const;
+  symbol, // Used for construct names (think of more)
 
-  static const(ConstructObject) fromUnquoted(const(char)[] unquoted)
-  {
-    if(unquoted == "int") {
-      return StandardType.int_;
-    }
-    if(unquoted == "uint") {
-      return StandardType.uint_;
-    }
-    return new StringLiteral(unquoted);
-  }
-}
-
-class ConstructType {
-}
-
-enum StandardTypeEnum {
+  pointer,
+  number,
+  integer_,
+  signed,
   int_,
+  byte_,
+  unsigned_,
   uint_,
+  ubyte_,
+  uni,
+  
+  array,
+  string,
+  ascii,
+  unicode,
+  utf8,
+
+  lengthArray,
+  lengthAscii,
+  lengthUnicode,
+  lengthUtf8,
+
+  limitArray,
+  limitAscii,
+  limitUnicode,
+  limitUtf8,
+
 }
-class StandardType : ConstructObject {
-  StandardTypeEnum type;
-  this(StandardTypeEnum type) immutable {
-    this.type = type;
+struct PrimitiveTypeDefinition
+{
+  string name;
+  PrimitiveTypeEnum typeEnum;
+  PrimitiveTypeEnum parentTypeEnum;
+  this(string name, PrimitiveTypeEnum typeEnum, PrimitiveTypeEnum parentTypeEnum)
+  {
+    this.name = name;
+    this.typeEnum = typeEnum;
+    this.parentTypeEnum = parentTypeEnum;
   }
-  immutable static StandardType int_ =
-    new immutable(StandardType)(StandardTypeEnum.int_);
-  immutable static StandardType uint_ =
-    new immutable(StandardType)(StandardTypeEnum.uint_);
+}
+immutable PrimitiveTypeDefinition[] primitiveTypes =
+  [
+   // NOTE: the anything type must have itself as it's parent
+   PrimitiveTypeDefinition("anything" , PrimitiveTypeEnum.anything , PrimitiveTypeEnum.anything),
+   PrimitiveTypeDefinition("type"     , PrimitiveTypeEnum.type     , PrimitiveTypeEnum.anything),
+   PrimitiveTypeDefinition("type"     , PrimitiveTypeEnum.symbol   , PrimitiveTypeEnum.anything),
+   PrimitiveTypeDefinition("pointer"  , PrimitiveTypeEnum.pointer  , PrimitiveTypeEnum.anything),
+   PrimitiveTypeDefinition("number"   , PrimitiveTypeEnum.number   , PrimitiveTypeEnum.anything),
+   PrimitiveTypeDefinition("integer"  , PrimitiveTypeEnum.integer_ , PrimitiveTypeEnum.number),
+   PrimitiveTypeDefinition("signed"   , PrimitiveTypeEnum.signed   , PrimitiveTypeEnum.integer_),
+   PrimitiveTypeDefinition("int"      , PrimitiveTypeEnum.int_     , PrimitiveTypeEnum.signed),
+   PrimitiveTypeDefinition("byte"     , PrimitiveTypeEnum.byte_    , PrimitiveTypeEnum.signed),
+   PrimitiveTypeDefinition("unsigned" , PrimitiveTypeEnum.unsigned_, PrimitiveTypeEnum.integer_),
+   PrimitiveTypeDefinition("uint"     , PrimitiveTypeEnum.uint_    , PrimitiveTypeEnum.unsigned_),
+   PrimitiveTypeDefinition("ubyte"    , PrimitiveTypeEnum.ubyte_   , PrimitiveTypeEnum.unsigned_),
+   PrimitiveTypeDefinition("uni"      , PrimitiveTypeEnum.uni      , PrimitiveTypeEnum.anything),
+
+   PrimitiveTypeDefinition("array"    , PrimitiveTypeEnum.array    , PrimitiveTypeEnum.anything),
+   PrimitiveTypeDefinition("string"   , PrimitiveTypeEnum.string   , PrimitiveTypeEnum.array),
+   PrimitiveTypeDefinition("ascii"    , PrimitiveTypeEnum.ascii    , PrimitiveTypeEnum.string),
+   PrimitiveTypeDefinition("unicode"  , PrimitiveTypeEnum.unicode  , PrimitiveTypeEnum.string),
+   PrimitiveTypeDefinition("utf8"     , PrimitiveTypeEnum.utf8     , PrimitiveTypeEnum.utf8),
+
+   PrimitiveTypeDefinition("lengthArray"  , PrimitiveTypeEnum.lengthArray    , PrimitiveTypeEnum.array),
+   PrimitiveTypeDefinition("lengthAscii"  , PrimitiveTypeEnum.lengthAscii    , PrimitiveTypeEnum.lengthArray),
+   PrimitiveTypeDefinition("lengthUnicode", PrimitiveTypeEnum.lengthUnicode  , PrimitiveTypeEnum.lengthArray),
+   PrimitiveTypeDefinition("lengthUtf8"   , PrimitiveTypeEnum.lengthUtf8     , PrimitiveTypeEnum.lengthUnicode),
+
+   PrimitiveTypeDefinition("limitArray"  , PrimitiveTypeEnum.limitArray    , PrimitiveTypeEnum.array),
+   PrimitiveTypeDefinition("limitAscii"  , PrimitiveTypeEnum.limitAscii    , PrimitiveTypeEnum.limitArray),
+   PrimitiveTypeDefinition("limitUnicode", PrimitiveTypeEnum.limitUnicode  , PrimitiveTypeEnum.limitArray),
+   PrimitiveTypeDefinition("limitUtf8"   , PrimitiveTypeEnum.limitUtf8     , PrimitiveTypeEnum.limitUnicode),
+   ];
+  
+
+abstract class ConstructObject
+{
+  size_t lineNumber;
+  this(size_t lineNumber)
+  {
+    this.lineNumber = lineNumber;
+  }
+  abstract void toString(scope void delegate(const(char)[]) sink) const;
+  abstract bool equals(const(ConstructObject) otherObj, bool checkLineNumber = true) const;
+
+  abstract BackendObject toBackendObject() const;
+  
+  @property
+  final bool isListBreak() const
+  {
+    return !(cast(ListBreak)this is null);
+  }
+
+  static ConstructObject fromUnquoted(size_t lineNumber, const(char)[] unquoted)
+  {
+    foreach(primitiveType; primitiveTypes) {
+      if(unquoted == primitiveType.name) {
+	return new PrimitiveType(lineNumber, primitiveType.typeEnum);
+      }
+    }
+    return new ConstructString(lineNumber, unquoted);
+  }
+  static PrimitiveType lookupType(size_t lineNumber, const(char)[] name) {
+    foreach(primitiveType; primitiveTypes) {
+      if(name == primitiveType.name) {
+	return new PrimitiveType(lineNumber, primitiveType.typeEnum);
+      }
+    }
+    return null;
+  }
+}
+abstract class BackendObject : ConstructObject
+{
+  this(size_t lineNumber)
+  {
+    super(lineNumber);
+  }
+  final override BackendObject toBackendObject() const
+  {
+    return cast(BackendObject)this;
+  }
+}
+
+
+abstract class Type : BackendObject
+{
+  this(size_t lineNumber)
+  {
+    super(lineNumber);
+  }
+}
+
+PrimitiveType create(PrimitiveTypeEnum typeEnum, size_t lineNumber)
+{
+  return new PrimitiveType(lineNumber, typeEnum);
+}
+class PrimitiveType : Type {
+  PrimitiveTypeEnum typeEnum;
+  this(size_t lineNumber, PrimitiveTypeEnum typeEnum)
+  {
+    super(lineNumber);
+    this.typeEnum = typeEnum;
+  }
   override void toString(scope void delegate(const(char)[]) sink) const
   {
-    sink(to!string(type));
+    sink(to!string(typeEnum));
   }
-  override bool equals(const(ConstructObject) otherObj) const
+  override bool equals(const(ConstructObject) otherObj, bool checkLineNumber = true) const
   {
-    auto other = cast(StandardType)otherObj;
-    return other && this.type == other.type;
+    if(checkLineNumber && lineNumber != otherObj.lineNumber) {
+      return false;
+    }
+    auto other = cast(PrimitiveType)otherObj;
+    return other && this.typeEnum == other.typeEnum;
+  }
+}
+class ConstructType : Type {
+  const(char)[] constructName;
+  this(size_t lineNumber, const(char)[] constructName) {
+    super(lineNumber);
+    this.constructName = constructName;
+  }
+  final override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    sink("(construct ");
+    sink(constructName);
+    sink(")");
+  }
+  final override bool equals(const(ConstructObject) otherObj, bool checkLineNumber = true) const
+  {
+    auto other = cast(ConstructType)otherObj;
+    return other && equals(other, checkLineNumber);
+  }
+  final bool equals(const(ConstructType) other, bool checkLineNumber = true) const
+  {
+    return this.constructName == other.constructName;
   }
 }
 
-
-class StringLiteral : ConstructObject
+class ConstructString : BackendObject
 {
   const(char)[] value;
   alias value this;
-  this(const(char)[] value) {
+  this(size_t lineNumber, const(char)[] value)
+  {
+    super(lineNumber);
     this.value = value;
   }
   override void toString(scope void delegate(const(char)[]) sink) const
@@ -130,147 +209,295 @@ class StringLiteral : ConstructObject
     sink(value);
     sink("\"");
   }
-  override bool equals(const(ConstructObject) otherObj) const
+  override bool equals(const(ConstructObject) otherObj, bool checkLineNumber = true) const
   {
-    auto other = cast(StringLiteral)otherObj;
+    if(checkLineNumber && lineNumber != otherObj.lineNumber) {
+      return false;
+    }
+    auto other = cast(ConstructString)otherObj;
     return other && this.value == other.value;
   }
 }
-class LongLiteral : ConstructObject
+class LongLiteral : BackendObject
 {
   long value;
-  this(long value) {
+  this(size_t lineNumber, long value)
+  {
+    super(lineNumber);
     this.value = value;
   }
   override void toString(scope void delegate(const(char)[]) sink) const
   {
     formattedWrite(sink, "%s", value);
   }
-  override bool equals(const(ConstructObject) otherObj) const
+  override bool equals(const(ConstructObject) otherObj, bool checkLineNumber = true) const
   {
+    if(checkLineNumber && lineNumber != otherObj.lineNumber) {
+      return false;
+    }
     auto other = cast(LongLiteral)otherObj;
     return other && this.value == other.value;
   }
 }
-  
-class ParamList : ConstructObject
+
+class ListBreak : BackendObject
 {
-  const(ConstructObject)[] params;
-  ConstructObject[string] namedParams;
-  this(const(ConstructObject)[] params = null, ConstructObject[string] namedParams = null)
+  /*
+  public static immutable ListBreak instance = new immutable ListBreak();
+  private this() immutable {
+  }
+  */
+  this(size_t lineNumber)
   {
-    this.params = params;
-    this.namedParams = namedParams;
+    super(lineNumber);
+  }
+  final override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    sink(",");
+  }
+  final override bool equals(const(ConstructObject) otherObj, bool checkLineNumber = true) const
+  {
+    if(checkLineNumber && lineNumber != otherObj.lineNumber) {
+      return false;
+    }
+    return cast(ListBreak)otherObj !is null;
+  }
+  final bool equals(const(ListBreak) other, bool checkLineNumber = true) const
+  {
+    if(checkLineNumber && lineNumber != other.lineNumber) {
+      return false;
+    }
+    return true;
+  }
+}
+
+// TODO: Should a list acceped named arguments?
+alias ConstructList = ConstructListImpl!ConstructObject;
+class ConstructListImpl(T) : T
+{
+  const(T)[] items;
+  //ConstructObject[const(char)[]] namedItems;
+  this(size_t lineNumber, const(T)[] items = null)//, ConstructObject[const(char)[]] namedItems = null
+  {
+    super(lineNumber);
+    this.items = items;
+    //this.namedItems = namedItems;
   }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink("(");
-    if(params.length > 0) {
-      params[0].toString(sink);
-      foreach(param; params[1..$]) {
+    if(items.length > 0) {
+      items[0].toString(sink);
+      foreach(item; items[1..$]) {
 	sink(" ");
-	param.toString(sink);
+	item.toString(sink);
       }
     }
-    // TODO: implement printing namedParams
-    //foreach(param; params) {
+    // TODO: implement printing namedItems
+    //foreach(item; items) {
     //}
     //sink(name);
     sink(")");
   }
-  final override bool equals(const(ConstructObject) otherObj) const
-  {
-    auto other = cast(ParamList)otherObj;
-    return other && equals(other);
+  static if ( is( T == ConstructObject) ) {
+    final override BackendObject toBackendObject() const
+    {
+      auto backendItems = new BackendObject[items.length];
+      foreach(i; 0..items.length) {
+	backendItems[i] = items[i].toBackendObject();
+      }
+      return new ConstructListImpl!BackendObject(lineNumber, backendItems);
+    }
   }
-  final bool equals(const(ParamList) other) const
+  
+  final override bool equals(const(ConstructObject) otherObj, bool checkLineNumber = true) const
   {
-    if(params.length != other.params.length) {
+    auto other = cast(ConstructListImpl!T)otherObj;
+    return other && equals(other, checkLineNumber);
+  }
+  final bool equals(const(ConstructListImpl!T) other, bool checkLineNumber = true) const
+  {
+    if(checkLineNumber && lineNumber != other.lineNumber) {
       return false;
     }
-    foreach(i; 0..params.length) {
-      if(!params[i].equals(other.params[i])) {
+    if(items.length != other.items.length) {
+      //writefln("[DEBUG] mismatched length");
+      return false;
+    }
+    foreach(i; 0..items.length) {
+      if(!items[i].equals(other.items[i])) {
+	//writefln("[DEBUG] mismatched item %s", i);
 	return false;
       }
     }
     return true;
   }
-}  
-class Construct : ConstructObject
+}
+alias Construct = ConstructImpl!ConstructObject;
+class ConstructImpl(T) : T
 {
   const(char)[] name;
-  const(ConstructObject)[] params;
-  ConstructObject[string] namedParams;
-  const(Construct)[] constructBlock;
-  this(const(char)[] name, const(ConstructObject)[] params = null,
-       ConstructObject[string] namedParams = null, const(Construct)[] constructBlock = null)
-  {
-    this.name = name;
-    this.params = params;
-    this.namedParams = namedParams;
-    this.constructBlock = constructBlock;
+  const(T)[] args;
+  T[const(char)[]] namedArgs;
+
+  static if( is(T == ConstructObject) ) {
+    this(size_t lineNumber, const(char)[] name,
+	 const(T)[] args = null, T[const(char)[]] namedArgs = null)
+    {
+      super(lineNumber);
+      this.name = name;
+      this.args = args;;
+      this.namedArgs = namedArgs;
+    }
+    final override BackendObject toBackendObject() const
+    {
+      throw new Exception("cannot call toBackendObject on a Construct");
+    }
+  } else static if( is(T == BackendObject) ) {
+    int function(ProcessingData*, const(BackendConstruct)) backendFunc;
+    this(size_t lineNumber, int function(ProcessingData*, const(BackendConstruct)) backendFunc,
+	 const(char)[] name, const(BackendObject)[] args = null, BackendObject[const(char)[]] namedArgs = null)
+      {
+	super(lineNumber);
+	this.backendFunc = backendFunc;
+	this.name = name;
+	this.args = args;;
+	this.namedArgs = namedArgs;
+      }
   }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
-    sink("Construct '");
+    sink("{Construct ");
     sink(name);
-    sink("' ");
-    if(params.length > 0) {
-      params[0].toString(sink);
-      foreach(param; params[1..$]) {
+    if(args.length > 0) {
+      foreach(arg; args) {
 	sink(" ");
-	param.toString(sink);
+	arg.toString(sink);
       }
     }
+    if(namedArgs.length) {
+      
+      foreach(keyValue; namedArgs.byKeyValue) {
+	sink(keyValue.key);
+	sink("=");
+	keyValue.value.toString(sink);
+      }
+    }
+    sink("}");
   }
-  final override bool equals(const(ConstructObject) otherObj) const
+  final override bool equals(const(ConstructObject) otherObj, bool checkLineNumber = true) const
   {
-    auto other = cast(Construct)otherObj;
-    return other && equals(other);
+    auto other = cast(ConstructImpl!T)otherObj;
+    return other && equals(other, checkLineNumber);
   }
-  final bool equals(const(Construct) other) const
+  final bool equals(const(ConstructImpl!T) other, bool checkLineNumber = true) const
   {
-    if(params.length != other.params.length ||
-       namedParams.length != other.namedParams.length ||
-       constructBlock.length != other.constructBlock.length ||
+    if(checkLineNumber && lineNumber != other.lineNumber) {
+      return false;
+    }
+    if(args.length != other.args.length ||
+       namedArgs.length != other.namedArgs.length ||
        name != other.name) {
       return false;
     }
-    foreach(i; 0..params.length) {
-      if(!params[i].equals(other.params[i])) {
+    foreach(i; 0..args.length) {
+      if(!args[i].equals(other.args[i])) {
 	return false;
       }
     }
-    if(namedParams || other.namedParams) {
-      throw new Exception("namedParams equality not implemented");
-    }
-    if(constructBlock || other.constructBlock) {
-      foreach(i; 0..constructBlock.length) {
-	if(!constructBlock[i].equals(other.constructBlock[i])) {
+    if(namedArgs.length) {
+      foreach(nameObj; namedArgs.byKeyValue) {
+	auto otherArg = other.namedArgs.get(nameObj.key, null);
+	if(!otherArg || !nameObj.value.equals(otherArg)) {
+	  //writefln("[DEBUG] named param '%s' does not match", nameObj.key);
 	  return false;
 	}
       }
     }
     return true;
   }
-  final void enforceParamCount(size_t count) const
+}
+
+struct BackendConstructBuilder
+{
+  Appender!(BackendObject[]) args;
+  BackendObject[const(char)[]] namedArgs;
+}
+
+struct ConstructParam
+{
+  const(char)[] name;
+  const(Type) type;
+}
+struct ConstructOptionalParam
+{
+  const(char)[] name;
+  const(Type) type;
+  const(ConstructObject) defaultValue;
+}
+struct ConstructDefinition
+{
+  const(char)[] name;
+  const(ConstructParam)[] requiredParams = void;
+  const(ConstructOptionalParam)[] optionalParams = void;
+  
+  int function(ConstructDefinition*, const(Construct), Appender!(BackendConstruct[]) ) processor;
+  int function(ConstructDefinition*, const(Construct), const(Construct), ref BackendConstructBuilder) childProcessor;
+  int function(ProcessingData*, const(BackendConstruct)) backendFunc;
+
+  this(const(char)[] name, const(ConstructParam)[] requiredParams,
+       const(ConstructOptionalParam)[] optionalParams,
+       int function(ConstructDefinition*,const(Construct), Appender!(BackendConstruct[]) ) processor,
+       int function(ConstructDefinition*, const(Construct), const(Construct), ref BackendConstructBuilder) childProcessor)
   {
-    if(params.length != count) {
-      throw new InvalidConstructException
-	(format("Construct '%s' requires %s parameters but have %s", name, count, params.length));
-    }
+    this.name = name;
+    this.requiredParams = requiredParams;
+    this.optionalParams = optionalParams;
+    this.processor = processor;
+    this.childProcessor = childProcessor;
   }
-  final T getParam(T)(size_t i) const if( is( T : ConstructObject ) )
+  this(string name, int function(ConstructDefinition*, const(Construct), Appender!(BackendConstruct[])) processor,
+       int function(ConstructDefinition*, const(Construct), const(Construct), ref BackendConstructBuilder) childProcessor) immutable
   {
-    if(i >= params.length) {
-      throw new InvalidConstructException
-	(format("Construct '%s' requires more parameters, expected '%s' at index %s but only have %s parameters", name, T.stringof, i, params.length));
+    this.name = name;
+    this.requiredParams = null;
+    this.optionalParams = null;
+    this.processor = processor;
+    this.childProcessor = childProcessor;
+  }
+  
+}
+
+struct ProcessingData {
+  ConstructDefinition[const(char)[]] constructMap;
+
+  int executeBackend(const(BackendConstruct)[] constructs)
+  {
+    stdout.flush();
+    foreach(construct; constructs) {
+      int error = executeBackend(construct);
+      if(error) {
+	return error;
+      }
     }
-    auto casted = cast(T)params[i];
-    if(!casted) {
-      throw new InvalidConstructException
-	(format("Construct '%s' expects a '%s' parameter at index %s, but got '%s'", name, T.stringof, i, typeid(params[i])));
+    return 0;
+  }
+  int executeBackend(const(BackendConstruct) construct)
+  {
+    writefln("[BACKEND] processing construct '%s'...", construct.name);
+    //stdout.flush();
+    
+    // TODO: I'm not sure I should keep looking up constructs
+    //       using the name
+    auto definition = constructMap.get(construct.name, ConstructDefinition());
+    if(definition.name == null) {
+      writefln("Error: backend found unknown construct '%s'", construct.name);
+      return 1;
     }
-    return casted;
+    if(!definition.backendFunc) {
+      writefln("Error: the '%s' construct is not meant to be executed by the backend, it should have been removed by the processor but wasn't for some reason.", construct.name);
+      return 1;
+    }
+    return definition.backendFunc(&this, construct);
   }
 }

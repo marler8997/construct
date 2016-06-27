@@ -1,0 +1,58 @@
+
+
+// Defines the constructs for procedural based programming
+
+// Defines data structues for the
+// semantic analysis
+semantics {
+  // define data structures to contain
+  // all the function definitions
+  // - A map from function name to the function construct
+  // - A map from function call to the call construct
+  //   (The reason for the call map is if the function
+  //    is defined after the call.  Once a function
+  //    becomes defined, you can check the call map
+  //    to see if anyone is calling that function)
+  // 
+}
+
+// Need some construct to specify a list
+// The construct should allow the specification of list patterns with
+// the breaks.
+defcon function (name utf8, returnType type, args)
+  afterParams=(args, {
+    // TODO: lookup function object to check for duplicates
+    // NOTE: the entry will depend on the name, return type, and args
+    // TODO: insert an entry into the lookup table
+    message "Need to add function to big function table";
+  })
+  after={
+    // Inject the code
+    message "Need to inject the code into the current context";
+  }
+;
+
+defcon return (value);
+
+
+/*
+Note: the backend will need to provide
+      a way to generate types that can
+      represent the construct based on
+      the construct definition.  For
+      example, a d backend could take this file
+      and create someting like this:
+
+[in backends/dsource/std/procedural.d]
+struct construct_function {
+   char[] name;
+   Type returnType;
+   //...
+}
+
+The D backends can then reference this code.
+The D processor would replace a construct function
+with an instance of this struct.
+
+*/
+

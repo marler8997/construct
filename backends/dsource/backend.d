@@ -1,155 +1,163 @@
 module backend;
 
-import std.stdio : writeln, writefln, File, stdout;
-import std.file  : setExtension, baseName, buildNormalizedPath;
-import std.conv  : to;
+import std.stdio  : writeln, writefln, File, stdout;
+import std.file   : setExtension, baseName, buildNormalizedPath;
+import std.string : format;
+import std.conv   : to;
 
 import construct.ir;
+import construct.processor : getArg, getItem, enforceArgCount;
 
-__gshared File output;
-__gshared int function(const(Construct) construct)[const(char)[]] handlerMap;
-
-int emit(string outputDir, string irLoaderFile, const(Construct)[] code)
+Exception implement(string message)
 {
-  string outputFilename =
-    buildNormalizedPath(outputDir, irLoaderFile.baseName.setExtension(".d"));
-
-  writefln("OutputFile : %s", outputFilename);
-  output = File(outputFilename, "w");
-
-  //
-  // Load the CORE constructs
-  //
-  handlerMap["import"]   = &importHandler;
-  
-  return emit(code);
+  return new Exception("not implemented: " ~ message);
 }
-int emit(const(Construct)[] constructs)
+
+enum string defaultExtension = ".d";
+int loadConstructBackend(ConstructDefinition* construct)
 {
-  foreach(construct; constructs) {
-    int error = emit(construct);
-    if(error) {
-      return error;
-    }
-  }
-  return 0;
-}
-int emit(const(Construct) construct)
-{
-  auto handler = handlerMap.get(construct.name, null);
-  if(handler == null) {
-    writefln("Error: unknown construct '%s'", construct.name);
+  if(construct.name == "function") {
+    construct.emitter = &functionEmitter;
+  } else if(construct.name == "return") {
+    construct.emitter = &returnEmitter;
+  } else if(construct.name == "write") {
+    construct.emitter = &writeEmitter;
+  } else {
+    writefln("Error: the dsource backend does not implement the '%s' construct", construct.name);
     return 1;
   }
-  return handler(construct);
-}
-
-int importHandler(const(Construct) construct)
-{
-  writeln("[DEBUG] got import!");
-  foreach(param; construct.params) {
-    auto literal = cast(StringLiteral)param;
-    if(!literal) {
-      writefln("Error: the 'import' construct can only have string literal parameters");
-      return 1;
-    }
-    if(literal.value == "std.io") {
-      writefln("[DEBUG] importing std.io");
-      output.writeln("import std.stdio : write;");
-      handlerMap["write"] = &writeHandler;
-    } else if(literal.value == "std.procedural") {
-      writefln("[DEBUG] importing std.procedural");
-      handlerMap["function"] = &functionHandler;
-      handlerMap["return"] = &returnHandler;
-    } else {
-      writefln("Error: unknown import '%s'", literal.value);
-      return 1;
-    }
-  }
   return 0;
 }
-
-string toD(StandardTypeEnum type)
+string toD(PrimitiveTypeEnum type)
 {
-  final switch(type) {
-  case StandardTypeEnum.int_: return "ptrdiff_t";
-  case StandardTypeEnum.uint_: return "size_t";
+  switch(type) {
+  case PrimitiveTypeEnum.int_: return "ptrdiff_t";
+  case PrimitiveTypeEnum.uint_: return "size_t";
+  case PrimitiveTypeEnum.utf8: return "char[]";
+  default:
+    throw new EmitException(format("toD for type '%s' is not implemented", type));
   }
 }
-
-//
-// std.procedural
-//
-int functionHandler(const(Construct) construct)
+const(char)[] toD(ConstructString lit)
 {
-  auto functionName = construct.getParam!StringLiteral(0);
-  auto returnType = construct.getParam!StandardType(1);
-  output.writefln("%s %s()", returnType.type.toD(), functionName.value);
-  output.writeln("{");
-  foreach(param; construct.params[2..$]) {
-    auto subConstruct = cast(Construct)param;
-    if(!subConstruct) {
-      writeln("Error: the 'main' construct only accepts Constructor parameters");
-      return 1;
-    }
-    int error = emit(subConstruct);
-    if(error) {
-      return error;
-    }
-  }
-  output.writeln("}");
-  return 0;
+  return lit.value;
 }
-
-const(char)[] toDCode(const(ConstructObject) obj)
+const(char)[] toD(LongLiteral lit)
+{
+  return to!string(lit.value);
+}
+const(char)[] toD(const(ConstructObject) obj)
 {
   {
-    StringLiteral lit = cast(StringLiteral)obj;
+    PrimitiveType primitiveType = cast(PrimitiveType)obj;
+    if(primitiveType) {
+      return primitiveType.toD;
+    }
+  }
+  {
+    ConstructString lit = cast(ConstructString)obj;
     if(lit) {
-      return lit.value;
+      return lit.toD;
     }
   }
   {
     LongLiteral lit = cast(LongLiteral)obj;
     if(lit) {
-      return to!string(lit.value);
+      return lit.toD;
     }
   }
-  writefln("Error: toDCode does not handle type '%s'", typeid(obj));
+  writefln("Error: toD does not handle type '%s'", typeid(obj));
   return null;
 }
 
-int returnHandler(const(Construct) construct)
+class EmitException : Exception
 {
-  construct.enforceParamCount(1);
-  auto code = construct.params[0].toDCode();
-  if(!code) {
-    return 1; // fail
+  this(string msg) {
+    super(msg);
   }
-  output.writefln("return %s;", code);
-  return 0;
 }
-/*
-int mainHandler(Construct construct)
+const(char)[] toD(const(Type) type)
 {
-  writeln("int main(string[] args)");
-  writeln("{");
-  foreach(param; construct.params) {
-    auto subConstruct = cast(Construct)param;
+  {
+    PrimitiveType primitiveType = cast(PrimitiveType)type;
+    if(primitiveType) {
+      return primitiveType.typeEnum.toD;
+    }
+  }
+  /*
+  {
+    Construct construct = cast(Construct)type;
+    if(construct) {
+      if(construct.name == 'array') {
+	return new ArrayType(
+      } else if(construct.name == 'const') {
+	
+      } else {
+	writefln("Error: toDeclType does not handle construct '%s'", construct.name);
+	return null;
+      }
+    }
+  }
+  */
+  throw new EmitException
+    (format("Error: toDeclType does not handle type '%s'", typeid(type)));
+}
+
+//
+// std.procedural
+//
+int functionEmitter(Emitter* emitter, const(Construct) construct)
+{
+  auto functionNameConstruct = construct.getArg!ConstructString(0);
+  auto returnTypeConstruct = construct.getArg!PrimitiveType(1);
+  emitter.output.writef("%s %s(", returnTypeConstruct.toD, functionNameConstruct.toD);
+
+  const size_t constructIndexOfArgs = 2;
+  auto args = construct.getArg!ConstructList(constructIndexOfArgs);
+  for(auto i = 0; i < args.items.length; i++) {
+    if(args.items[i].isListBreak) {
+      emitter.output.write(", ");
+    } else {
+      auto argName = args.getItem!ConstructString(construct, constructIndexOfArgs, i);
+      i++;
+      if(i >= args.items.length) {
+	writefln("Error: function argument has no type");
+	return 1; // error
+      }
+      auto argType = args.getItem!Type(construct, constructIndexOfArgs, i);
+      emitter.output.writef("%s %s", argType.toD, argName.toD);
+    }
+  }
+
+  emitter.output.writeln(")");
+  emitter.output.writeln("{");
+
+  foreach(arg; construct.args[3..$]) {
+    auto subConstruct = cast(Construct)arg;
     if(!subConstruct) {
-      writeln("Error: the 'main' construct only accepts Constructor parameters");
+      writefln("Error: the 'function' construct expected a construct parameter but got '%s'", typeid(arg));
       return 1;
     }
-    int error = emit(subConstruct);
+    int error = emitter.emit(subConstruct);
     if(error) {
       return error;
     }
   }
-  writeln("}");
+  emitter.output.writeln("}");
   return 0;
 }
-*/
-int writeHandler(const(Construct) construct)
+
+int returnEmitter(Emitter* emitter, const(Construct) construct)
+{
+  construct.enforceArgCount(1);
+  auto code = construct.args[0].toD;
+  if(!code) {
+    return 1; // fail
+  }
+  emitter.output.writefln("return %s;", code);
+  return 0;
+}
+int writeEmitter(Emitter* emitter, const(Construct) construct)
 {
   string dMethod = "write";
   /*
@@ -160,20 +168,20 @@ int writeHandler(const(Construct) construct)
     dMethod = "writeln":
   }
   */
-  output.writef("%s(", dMethod);
-  foreach(i, param; construct.params) {
+  emitter.output.writef("%s(", dMethod);
+  foreach(i, arg; construct.args) {
     if(i > 0) {
-      output.write(", ");
+      emitter.output.write(", ");
     }
     
-    auto literal = cast(StringLiteral)param;
+    auto literal = cast(ConstructString)arg;
     if(!literal) {
-      writeln("Error: the 'write' construct only accepts StringLiteral paramaeters");
+      writeln("Error: the 'write' construct only accepts ConstructString arguments");
       return 1;
     }
-    output.write('"', literal.value, '"');
+    emitter.output.write('"', literal.value, '"');
   }
-  output.writeln(");");
+  emitter.output.writeln(");");
   
   return 0;
 }

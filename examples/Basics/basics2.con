@@ -1,0 +1,28 @@
+import std.procedural;
+import std.io;
+
+
+function main int (args/utf8)
+{
+  call safeDivide(3, 0);
+
+  equal 14 /addConstruct(4, 9);
+  equal 14 /call addFunction(4, 9);
+
+  return /call addFunction(3, 4);
+}
+
+//
+// You can define the add logic as a construct or a function
+//
+construct addConstruct (x number, y number) evaluatesTo=/type x;
+function addFunction int (x int, y int)
+{
+  // no implementation, implemented by backend
+}
+function safeDivide int ((x)(y)) guards=
+{
+  notZero y
+}{
+  // no implementation, implemented by backend
+}

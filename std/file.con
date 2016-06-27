@@ -1,0 +1,10 @@
+/*
+Contains a library for interacting with files.
+
+*/
+
+deftype File;
+
+function open File (filename string);
+
+function readFile string (filename string);

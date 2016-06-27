@@ -1,0 +1,14 @@
+/*
+This file shows how the core constructs could be defined.
+However, they cannot be defined here because they are needed to define constructs.
+Without these constructs you can't define any constructs so it is just for demonstration purposes.
+
+defcon defcon (name utf8) (evalTo type);
+defcon deftype ...;
+defcon construct (name utf8) evalTo=construct;
+defcon struct (name symbol, /list ...?);
+*/
+
+// TODO: insert unit tests
+unittest {
+}

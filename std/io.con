@@ -1,4 +1,7 @@
-construct write
+
+defcon write (message utf8);
+/*
+defcon write (format utf8)
 {
   input {
     format : string,
@@ -7,7 +10,8 @@ construct write
   }
 }
 
-construct writeln
+defcon writeln
 {
   forward(write, appendNewline=true);
 }
+*/

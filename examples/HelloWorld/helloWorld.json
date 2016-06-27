@@ -1,32 +1,26 @@
-{
-    "constructs":[
-	{
-	    "type":"Construct",
-	    "name":"import",
-	    "args":["std.procedural"]
-	},
-	{
-	    "type":"Construct",
-	    "name":"function",
-	    "args":[
-		"main",
-		{"type":"StandardType","name":"int"},
-		{
-		    "type":"Construct",
-		    "name":"import",
-		    "args":["std.io"]
-		},
-		{
-		    "type":"Construct",
-		    "name":"write",
-		    "args":["Hello, World!"]
-		},
-		{
-		    "type":"Construct",
-		    "name":"return",
-		    "args":[0]
-		}
-	    ]
-	}
-    ]
-}
+[
+    {
+	"name":"import",
+	"args":["std.procedural"]
+    },{
+	"name":"import",
+	"args":["std.io"]
+    },{
+	"name":"function",
+	"args":[
+	    "main",
+	    "int",
+	    ["args", "utf8"],
+	    {
+		"type":"construct",
+		"name":"write",
+		"args":["Hello, World!"]
+	    },
+	    {
+		"type":"construct",
+		"name":"return",
+		"args":[0]
+	    }
+	]
+    }
+]

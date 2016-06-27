@@ -1,0 +1,5 @@
+import std.procedural;
+
+function main int () {
+  return 0;
+}
