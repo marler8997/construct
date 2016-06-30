@@ -3,12 +3,39 @@ This file shows how the core constructs could be defined.
 However, they cannot be defined here because they are needed to define constructs.
 Without these constructs you can't define any constructs so it is just for demonstration purposes.
 
-defcon defcon (name utf8) (evalTo type);
+defcon defcon (name symbol) (evalTo type, noscope bool, openScope bool);
 defcon deftype ...;
+defcon exec (code constructBlock);
 defcon construct (name utf8) evalTo=construct;
 defcon struct (name symbol, /list ...?);
+//defcon let () (...);
+//defcon scope;
+
+Types of Backends
+=======================
+
+#### Generic Backend
+After the constructs are processed, it accepts the processed constructs and does something with them. Every backed is a generic backend but some backends are more specific.
+Examples: eval
+
+#### Compiler Backend
+After the constructs are processed, it outputs a file in another langage.  It could be machine code, assembly, or another programming language.
+Examples: dsource
+
+What can a construct do?
+========================
+- Represents an action to take
+  (The 'eval' backed will take the action, a compiler backend will output code in the output language)
+- 
+
+
 */
 
+// Write a message while constructs are being processed.
+defcon message (msg utf8);
+
+/*
 // TODO: insert unit tests
 unittest {
 }
+*/

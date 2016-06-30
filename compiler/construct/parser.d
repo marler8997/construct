@@ -8,11 +8,16 @@ static import construct.jsonParser;
 
 class ConstructParseException : Exception
 {
-  size_t lineNumber;
-  this(size_t lineNumber, string msg) {
-    super(msg);
-    this.lineNumber = lineNumber;
+  size_t constructLineNumber;
+  this(size_t constructLineNumber, string msg, string codeFile = __FILE__, size_t codeLine = __LINE__) {
+    super(msg, codeFile, codeLine);
+    this.constructLineNumber = constructLineNumber;
   }
+}
+struct SourceFile
+{
+  const(char)[] name;
+  const(Construct)[] constructs = void;
 }
 
 struct ConstructParser {

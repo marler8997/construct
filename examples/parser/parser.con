@@ -1,0 +1,21 @@
+
+
+defcon message;
+
+defcon parser (name symbol, code constructBlock) {
+  defcon endOfInput evalTo=bool {
+    message "Parser called endOfInput";
+  }
+  message "Called the parser!";  
+  exec code;
+}
+
+
+parser parseUnsigned {
+  if /endOfInput\ /{
+    message "At end of input";
+  } else {
+    message "Not at end of input";
+  }
+}
+

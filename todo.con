@@ -1,20 +1,24 @@
 //
 // NOTE: This todo is written in construct
 //
-defcon item (name utf8, description utf8) (dependsOn /list utf8);
-defcon todo (items /list/construct item);
+defcon item (name string, description string) (dependsOn string) {}
+defcon todo (items /list item) {}
 
 todo {
+  item ChangeDefconToScope "Instead of having a global construct map, I need to add the constructs to the symbol map in the scope.";
   item EvaluateTo dependsOn=(NamedParams) "Implement the evaulateTo parameter on constructs.";
   item ExecBackend "Create a backend that will execute construct.  This will be needed to implement the semantics construct.";
+  item GenerateBackendConstructObjects "Generate backend data structures that can represent the constructs based on the construct definitions."
   item ThinkAboutStrings "Think about adding different syntax to the cfamilyparser to specify strings.";
   item JsonBackend "Create a backend that will write JSON.";
   item Enums "Create an enum implementation, either in the language or in a library, not sure which.";
   item Structs "Create constructs to define and reference struct types.";
   item ConstructBackend "Create a backend that will write standard c-family construct code.";
+  item ConstructBuild "Create constructs that can build.";
   item BackendInterface "Define the backend interface.  There should be a backend type, and a backend implementation.  The type of the backend indicates what the backend is written in.  This is used by the compiler to generate assets for the backend to use for it's implementationr.  For example, if the backend type is D Programming Language source code, then the compiler will generate data structures in the D programming language for each construct definition so the implementation can use those structures.  The backend imlementation can then use those structures process raw constructs into their generated data structures, and then the emitter use them again to emit code.";
   item ThinkAboutNamedItemsInLists "Not sure if lists should allows named items inside them.  If I can think of a case where they would make a lot of sense, I might add them.";
   item IdeaMultipleSyntax "It might be a good idea for the language to define a structure that allows you to modify the syntax you are using.  Say you are using the cfamily syntax, and in the middle you'd like to switch to some custom syntax, then the cfamily syntax could have a syntax that allows you to break into another syntax.  If I use this idea, this syntax switch should probably be defined in construct's source code data structures";
-  item CFrontEnd "Create a C Front end that will compile to Construct";
+  item CFrontEnd "Create a C Front end that will compile to Construct. Support C99, maybe C11. I don't think there's any reason to support a C89/C90/C95/C99 front end because I believe that any code written with those versions can be compiled by a C11 front end.";
   item UnitTestConstruct "Create a unittest construct that works similar to the D unittest block";
+  item CSharpFrontEnd "Note: I might be able to use Roslyn to help create a C# front end";
 }

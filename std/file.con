@@ -8,3 +8,19 @@ deftype File;
 function open File (filename string);
 
 function readFile string (filename string);
+
+/*
+
+Look at the linux commands and make sure they can be implemented in this library.
+Then possibly implement the linux tools in construct as examples.
+- cat (read and write to files)
+- cp (copy files)
+- read/write environment variables
+- ls (list files)
+
+NOTE: stdout/stderr/stdin should probably be in it's own module.  Just because
+      code accesses files does not necessarily mean they need to access those standard streams.
+
+
+
+*/

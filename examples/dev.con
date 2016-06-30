@@ -1,0 +1,236 @@
+// -*-mode: c;-*-
+// Enables Syntax Highlighting for github and emacs
+
+/*
+This file is used to test features I'm developing for and features
+that I'm trying to keep working while developing.
+*/
+
+//
+// Some Helper constructs
+//
+defcon message (msg string);
+defcon comment {
+  // do nothing, it's a comment
+}
+defcon scope (code constructBlock) {
+  exec code;
+}
+
+defcon not (value nullable) evalTo=bool {
+  if /equals value null\ {
+    return true;
+  }
+  return false;
+}
+/* overrides not implemented
+defcon not (value bool) evalTo=bool {
+  if value /{
+    return false;
+  } else {
+    return true;
+  }
+}
+*/
+  
+// Create a construct that makes sure it gets a failure
+// The addSymbolsToParentScope means that the construct block will
+// add any new symbols to the parent scope.
+defcon expectFail (code constructBlock)
+{
+  let thrownError = null;
+  catch addSymbolsToParentScope=true code
+  (error) {
+    message "Got Expected Error: " error;
+    set thrownError = error;
+  }
+  //message "Thrown error is: " thrownError;
+  if /equals thrownErrror null\ {
+    throw "expected failure but did not get it";
+  }
+}
+
+expectFail {
+  throw "expectFail should catch this!";
+}
+
+
+catch /{
+  expectFail {
+    message "here1";
+    // no error
+  }
+  throw "expectFail did not fail on success";
+} (error) {
+}
+/* TODO: not working
+expectFail {
+  // this should cause a problem since we got no failure
+}
+*/
+expectFail { expectFail; }
+
+// TODO: make sure that addSymbolsToParentScope works recursively
+
+expectFail {
+  defcon import{} // import construct already defined in global scope
+}
+expectFail {
+  defcon defcon{} // defcon construct already defined in global scope
+}
+scope {
+  defcon import{}                // ok because defining inside another scope
+  defcon defcon (name string) {} // ok because defining inside another scope
+  defcon doesNothing;            // calls the new 'defcon' construct, which does nothing
+  
+  /* TODO: Can't recover from this failure yet
+  expectFail {
+    doesNothing;
+  }
+  */
+}
+expectFail {
+  defcon "cantUseStringHere" {}
+}
+expectFail {
+  defcon badAttributes addSymbolsToParentScope=true openScope=true;
+}
+
+expectFail {
+  catch {} // not enough arguments
+}
+
+
+scope {
+  defcon testNoScope (noScopeCode constructBlock) {
+    exec addSymbolsToParentScope=true noScopeCode;
+  }
+  testNoScope {
+    let noScopeVar = "the noScopeVar";
+  }
+  message noScopeVar;
+}
+
+
+expectFail {
+  defcon unrecognizedNamedArg badName=false;
+}
+
+// Open Scope Test
+scope {
+  let x = "The x variable";
+  defcon wontWork {
+    message x;
+  }
+  defcon willWork openScope=true {
+    message x;
+  }
+  expectFail {
+    wontWork;
+  }
+  willWork;
+}
+
+
+
+// Call construct before it exists
+forwardCallExample;
+forwardCallExample; // call twice to make sure it works
+defcon forwardCallExample {
+  message "forward construct calls work!";
+}
+
+
+// Call construct before it exists with argument
+messageWrapper "Calling a forward construct with a parameter!";
+defcon messageWrapper (message utf8) {
+  message message;
+}
+
+// Call construct before it exists inside another scope
+/* TODO: this doesn't work yet
+scope {
+  forwardCallInsideScopeExample;
+}
+*/
+/* TODO: this doesn't work yet
+defcon forwardCallInsideScopeExample () {
+}
+defcon wrapper () {
+  forwardCallInsideConstructExample;
+}
+wrapper;
+*/
+defcon forwardCallInsideConstructExample () {
+}
+
+
+
+// TODO: implement if
+// TODO: implement forward references in a higher scope
+
+// circular construct reference
+// circularReferenceA 10; TODO; doesn't work yet
+defcon circularReferenceA (value byte) {
+  if /equals value 0\ {
+    return;
+  }
+  // TODO: print value as well
+  message "circularReferenceA";
+  circularReferenceB /decrement 0;
+}
+defcon circularReferenceB (value byte) {
+  if /equals value 0\ {
+    return;
+  }
+  // TODO: print value as well
+  message "circularReferenceB";
+  circularReferenceA /decrement 0;
+}
+
+
+
+//let x "the string for variable x";
+let x = "the string for variable x";
+expectFail {
+  let x = "defined twice";
+}
+
+// Call the construct with a symbol
+message x; 
+
+
+
+
+expectFail {
+  defcon requiredParamsCantHaveDefault (value string null) {}
+}
+
+defcon implicitDefaultValue () (value string) {}
+defcon explicitDefaultValue () (value string null) {}
+
+
+
+
+if true {
+  message "if true works!";
+}
+defcon trueConstruct evalTo=bool {
+  return true;
+}
+defcon stringConstruct evalTo=string {
+  return "a string";
+}
+
+expectFail {
+  if /comment\ {
+  }
+}
+expectFail {
+  if /stringConstruct\ {
+  }
+}
+
+if /trueConstruct\ {
+  message "if trueConstruct works!";
+}

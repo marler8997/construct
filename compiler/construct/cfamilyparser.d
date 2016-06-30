@@ -1,11 +1,22 @@
 /*
 Grammar (The 'C' family syntax.  Supposed to look similar to "C-Like" languages)
 ====================================================================
-constructs ::= (name basic-arg* (';' | '{' constructs '}') )*
+
+Version that shows internals
+----------------------------
+constructs ::= (name (basic-arg | '/' '{' constructs '}' )* (';' | '{' constructs '}') )*
 basic-arg ::= string  ('=' arg)? | list | arg-construct
 arg ::= basic-arg | '{' construct '}'
-list ::= '(' ( ',' | arg ) * ')'
+list ::= '(' ( ',' | arg | '/' '{' constructs '}' ) * ')'
 arg-construct ::= '/' name arg* '\'?
+
+NOTE:
+  construct {...}
+  construct (/{...}); is the same as
+
+The first version is just a shorthand way to write it.
+
+
 */
 
 module construct.cfamilyparser;
@@ -78,8 +89,8 @@ enum ErrorType {
 class ConstructCFamilyParseException : ConstructParseException
 {
   ErrorType type;
-  this(ErrorType type, size_t lineNumber, string msg) {
-    super(lineNumber, msg);
+  this(ErrorType type, size_t constructLineNumber, string msg, string codeFile = __FILE__, size_t codeLine = __LINE__) {
+    super(constructLineNumber, msg, codeFile, codeLine);
     this.type = type;
   }
 }
@@ -127,14 +138,6 @@ struct ConstructConsumer
 {
   // TODO: this should be const
   const(char)* limit;
-  /*
-  final void enforceEnd(ConstructConsumerState* state) const
-  {
-    if(state.next < limit) {
-      throw new ConstructCFamilyParseException(ErrorType.expectedEnd, state.lineNumber, "expected input to end but did not");
-    }
-  }
-  */
 
   // InputState:
   //   next points to first character
@@ -247,21 +250,6 @@ struct ConstructConsumer
 			       ref ConstructObject[const(char)[]] namedArgs,
 			       ConstructConsumerState* state) const
   {
-    /*
-    if(state.next >= limit) {
-      string message;
-      if(context == ArgContext.normalConstruct) {
-	message = "the last construct was not ended with ';' or '{' section '}'";
-      } else if(context == ArgContext.list) {
-	message = "input ended inside a list";
-      } else {
-	message = "input ended inside an argument construct";
-      }
-      throw new ConstructCFamilyParseException(ErrorType.endedEarly, state.lineNumber, message);
-    }
-    readChar(state);
-    */
-    
     // Parse arguments
     while(true) {
       consumeWhitespaceAndComments(state);
@@ -293,8 +281,10 @@ struct ConstructConsumer
 	  throw new ConstructCFamilyParseException
 	    (ErrorType.unspecified, state.lineNumber, "I haven't decided how to handle construct blocks in arg-constructs yet");
 	}
-
-	parseConstructs(true, cast(Appender!(const(Construct)[]))args, state);
+	auto blockLineNumber = state.lineNumber;
+	auto newConstructs = appender!(const(Construct)[])();
+	parseConstructs(true, newConstructs, state);
+	args.put(new ConstructBlock(blockLineNumber, newConstructs.data));
 	readChar(state);
 	if(context == ArgContext.list) {
 	  continue;
@@ -336,19 +326,27 @@ struct ConstructConsumer
 	    (ErrorType.endedEarly, state.lineNumber, "ended inside a arg construct");
 	}
 
+	// Escaped Construct Block
+	if(state.c == '{') {
+	  parseConstructs(true, cast(Appender!(const(Construct)[]))args, state);
+	  readChar(state);
+	  continue;
+	}
+
+	// Must be an argument construct
 	if(!isFirstCharacterOfName(state.c)) {
 	  throw new ConstructCFamilyParseException
 	    (ErrorType.invalidChar, state.lineNumber,
 	     format("expected a construct name but got '%s'", AsciiPrint(state.c)));
 	}
 
-        auto constructLineNumber = state.lineNumber;
+	auto constructLineNumber = state.lineNumber;
 	auto constructName = parseName(state);
 	if(state.cpos >= limit) {
 	  throw new ConstructCFamilyParseException
 	    (ErrorType.endedEarly, state.lineNumber, "input ended inside a arg construct");
 	}
-
+	
 	auto argConstructArgs = appender!(ConstructObject[])();
 	ConstructObject[const(char)[]] argConstructNamedArgs = null;
 	parseArgs(ArgContext.argConstruct, argConstructArgs, argConstructNamedArgs, state);
@@ -406,6 +404,13 @@ struct ConstructConsumer
 	goto NEXT_ARG;
       }
 
+      if(c == '\\') {
+        if(context == ArgContext.argConstruct) {
+          readChar(state);
+          return;
+        }
+      }
+      
       if(c == ')') {
 	if(context == ArgContext.list) {
 	  readChar(state);
@@ -465,7 +470,7 @@ struct ConstructConsumer
       // Need to read the next character to normalize
       // the output state for this function
       readChar(state);
-      return new ConstructList(lineNumber, constructs.data);
+      return new ConstructBlock(lineNumber, constructs.data);
 	
     }
     
@@ -795,8 +800,8 @@ unittest
 
   testError(ErrorType.invalidChar, "abc #");
   testError(ErrorType.endedEarly, "function myfunc");
-  test("function myfunc;", [new Construct(1, "function", [new ConstructString(1, "myfunc")])]);
-  test("function /*comment*/ myfunc /* comment2 */;", [new Construct(1, "function", [new ConstructString(1, "myfunc")])]);
+  test("function myfunc;", [new Construct(1, "function", [new ConstructSymbol(1, "myfunc")])]);
+  test("function /*comment*/ myfunc /* comment2 */;", [new Construct(1, "function", [new ConstructSymbol(1, "myfunc")])]);
 
   testError(ErrorType.invalidChar, "a (;");
   testError(ErrorType.invalidChar, "a )");
@@ -807,11 +812,11 @@ unittest
 
   testError(ErrorType.endedEarly, "a(first");
   testError(ErrorType.endedEarly, "a(first)");
-  test("a (first);", [new Construct(1, "a", [new ConstructList(1, [new ConstructString(1, "first")])])]);
-  test("a ( first )  ;", [new Construct(1, "a", [new ConstructList(1, [new ConstructString(1, "first")])])]);
-  test("a /*comment*/(/*another*/first/*what*/)/*hey*/;", [new Construct(1, "a", [new ConstructList(1, [new ConstructString(1, "first")])])]);
+  test("a (first);", [new Construct(1, "a", [new ConstructList(1, [new ConstructSymbol(1, "first")])])]);
+  test("a ( first )  ;", [new Construct(1, "a", [new ConstructList(1, [new ConstructSymbol(1, "first")])])]);
+  test("a /*comment*/(/*another*/first/*what*/)/*hey*/;", [new Construct(1, "a", [new ConstructList(1, [new ConstructSymbol(1, "first")])])]);
 
-  test("a (first second);", [new Construct(1, "a", [new ConstructList(1, [new ConstructString(1, "first"), new ConstructString(1, "second")])])]);
+  test("a (first second);", [new Construct(1, "a", [new ConstructList(1, [new ConstructSymbol(1, "first"), new ConstructSymbol(1, "second")])])]);
 
   testError(ErrorType.invalidChar, "/a");
   testError(ErrorType.invalidChar, " / a ");
@@ -824,17 +829,17 @@ unittest
   testError(ErrorType.endedEarly, "abc/");
 
   test("abc/string;", [new Construct(1, "abc", [new Construct(1, "string")])]);
-  test("abc (a/string);", [new Construct(1, "abc", [new ConstructList(1, [new ConstructString(1, "a"), new Construct(1, "string")])])]);
+  test("abc (a/string);", [new Construct(1, "abc", [new ConstructList(1, [new ConstructSymbol(1, "a"), new Construct(1, "string")])])]);
 
   testError(ErrorType.unspecified, "a /sub {");
   testError(ErrorType.unspecified, "a /sub {}");
 
   test("a ;", [new Construct(1, "a")]);
-  test("a {}", [new Construct(1, "a")]);
-  test("a {b;c;}", [new Construct(1, "a", [new Construct(1, "b"), new Construct(1, "c")])]);
-  test("a ({b;c;}) ;", [new Construct(1, "a", [new ConstructList(1, [new Construct(1, "b"), new Construct(1, "c")])])]);
-  test("a ( ({b;c;}) ) ;", [new Construct(1, "a", [new ConstructList(1, [new ConstructList(1, [new Construct(1, "b"), new Construct(1, "c")])])])]);
-  test("a ({b;c;}) {}", [new Construct(1, "a", [new ConstructList(1, [new Construct(1, "b"), new Construct(1, "c")])])]);
+  test("a {}", [new Construct(1, "a", [new ConstructBlock(1)])]);
+  test("a {b;c;}", [new Construct(1, "a", [new ConstructBlock(1, [new Construct(1, "b"), new Construct(1, "c")])])]);
+  //test("a ({b;c;}) ;", [new Construct(1, "a", [new ConstructList(1, [new Construct(1, "b"), new Construct(1, "c")])])]);
+  //test("a ( ({b;c;}) ) ;", [new Construct(1, "a", [new ConstructList(1, [new ConstructList(1, [new Construct(1, "b"), new Construct(1, "c")])])])]);
+  //test("a ({b;c;}) {}", [new Construct(1, "a", [new ConstructList(1, [new Construct(1, "b"), new Construct(1, "c")])])]);
 
   testError(ErrorType.invalidChar, "}");
 
@@ -849,11 +854,11 @@ unittest
 
   // List Breaks
   test("a (c,d,e);", [new Construct(1, "a", [new ConstructList(1, [
-							       new ConstructString(1, "c"),
+							       new ConstructSymbol(1, "c"),
 							       new ListBreak(1),
-							       new ConstructString(1, "d"),
+							       new ConstructSymbol(1, "d"),
 							       new ListBreak(1),
-							       new ConstructString(1, "e"),
+							       new ConstructSymbol(1, "e"),
 							       ])])]);
 
   // Named Args
@@ -887,9 +892,19 @@ unittest
   testError(ErrorType.argsWithSameName, "a b=() b=d;");
   
   test("a b=();", [new Construct(1, "a", null, ["b": new ConstructList(1)])]);
-  test("a b=(c d);", [new Construct(1, "a", null, ["b": new ConstructList(1, [new ConstructString(1, "c"), new ConstructString(1, "d")])])]);
-  test("a b=c;", [new Construct(1, "a", null, ["b": new ConstructString(1, "c")])]);
-  test("a b={};", [new Construct(1, "a", null, ["b": new ConstructList(1, null)])]);
+  test("a b=(c d);", [new Construct(1, "a", null, ["b": new ConstructList(1, [new ConstructSymbol(1, "c"), new ConstructSymbol(1, "d")])])]);
+  test("a b=c;", [new Construct(1, "a", null, ["b": new ConstructSymbol(1, "c")])]);
+  test("a b={};", [new Construct(1, "a", null, ["b": new ConstructBlock(1, null)])]);
   test("a b=/hey;", [new Construct(1, "a", null, ["b": new Construct(1, "hey")])]);
+
+  // Escaped Construct Block
+  testError(ErrorType.endedEarly, "a /{b;}");
+  test("a /{b;};", [new Construct(1, "a", [new Construct(1, "b")])]);
+  test("a /{b;} {}", [new Construct(1, "a", [new Construct(1, "b"), new ConstructBlock(1)])]);
+
+
+  // Unescaped construct block
+  testError(ErrorType.endedEarly, `a /b\`);
+  test(`a /b\;`, [new Construct(1, "a", [new Construct(1, "b")])]);
 }
 

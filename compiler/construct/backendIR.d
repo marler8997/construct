@@ -1,38 +1,19 @@
 module construct.backendIR;
 
-import std.conv : to;
+import std.array : Appender;
+import std.conv  : to;
 import construct.ir;
 
+
+struct BackendConstructBuilder
+{
+  Appender!(BackendObject[]) args;
+  BackendObject[const(char)[]] namedArgs;
+}
 
 alias BackendConstruct = ConstructImpl!(BackendObject);
 alias BackendList = ConstructListImpl!BackendObject;
 
-/*
-class BackendConstruct : BackendObject
-{
-  int function(ProcessingData*, const(BackendConstruct)) backendFunc;
-  const(char)[] name;
-  const(BackendObject)[] args;
-  BackendObject[const(char)[]] namedArgs;
-  this(size_t lineNumber, int function(ProcessingData*, const(BackendConstruct)) backendFunc,
-       const(char)[] name, const(BackendObject)[] args = null, BackendObject[const(char)[]] namedArgs = null)
-  {
-    super(lineNumber);
-    this.backendFunc = backendFunc;
-    this.name = name;
-    this.args = args;;
-    this.namedArgs = namedArgs;
-  }
-  override void toString(scope void delegate(const(char)[]) sink) const
-  {
-    throw new Exception("not implemented");
-  }
-  override bool equals(const(ConstructObject) otherObj, bool checkLineNumber = true) const
-  {
-    throw new Exception("not implemented");
-  }
-}
-*/
 
 abstract class BackendType : BackendObject
 {
@@ -41,7 +22,7 @@ abstract class BackendType : BackendObject
     super(lineNumber);
   }
 }
-class BackendPrimitiveType : Type {
+class BackendPrimitiveType : ConstructType {
   PrimitiveTypeEnum typeEnum;
   this(size_t lineNumber, PrimitiveTypeEnum typeEnum)
   {

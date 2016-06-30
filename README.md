@@ -7,7 +7,7 @@ These data structures fit inside the basic unit of the construct language, the "
 which is simply a object with a name and some arguments.
 Then language consists entirely of construct objects.
 
-What the constructs do depend on the backend.
+What the constructs do depend on the libraries and the backend.
 One backend may execute the constructs, one may emit machine code, another
 may emit code in another programming language.
 
@@ -108,6 +108,6 @@ as long as it reduces to other constructs.  If it cannot reduce, then they will 
 for every back they want to support.
 
 ## Configurable Syntax
-Construct uses an extremely simple syntax that requires more text but allows infinite customization.  A rich syntax allows programmers to say what they want in a small number of characters.  A good syntax is extremely powerful, however, as semantics change through new libraries and new techniques, the syntax gets left behind as it cannot be changed without breaking existing code or creating a mess with syntax that looks "hacked on".
+Construct uses an simple syntax that requires more text but allows infinite customization.  A rich syntax allows programmers to say what they want in a small number of characters.  A good syntax is extremely powerful, however, as semantics change through new libraries and new techniques, the syntax gets left behind as it cannot be changed without breaking existing code or creating a mess with syntax that looks "hacked on".
 
 The construct syntax sacrifices brevity for flexibility.  It's verbosity is designed to allow it to adhere to any set of new semantics.  This allows the semantics to be modified and extended without having to figure out how to add the new semantics to the language.

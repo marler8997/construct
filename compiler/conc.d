@@ -1,9 +1,8 @@
 //
 // conc = Construct Compiler
 //
-module construct.loader;
-
 import std.stdio  : writeln, writefln, stdout, File;
+import std.getopt : getopt;
 import std.array  : appender, Appender;
 import std.file   : read, exists, mkdir, baseName, dirName, buildNormalizedPath;
 import std.path   : setExtension;
@@ -13,18 +12,19 @@ import std.format : formattedWrite;
 import utf8;
 import construct.ir;
 import construct.backendIR;
-import construct.parser : getParser, ConstructParseException;
-import construct.processor : ImportPath, Importer, processConstructs, InvalidConstructException;
-
-import backend : executeBackend;
+import construct.parser : SourceFile, getParser, ConstructParseException;
+import construct.processor : ProcessorState, ImportPath, processConstructs, SemanticException, verbose;
 
 void usage(string program)
 {
-  writefln("Usage: %s <construct-file>", program.baseName);
+  writefln("Usage: %s <source-file>", program.baseName);
 }
 int main(string[] args)
 {
   string program = args[0];
+
+  getopt(args,
+	 "v|verbose", &verbose);
   args = args[1..$];
     
   if(args.length <= 0) {
@@ -37,80 +37,60 @@ int main(string[] args)
     return 1;
   }
 
-  string constructFile = args[0];
-  if(!exists(constructFile)) {
-    writefln("Error: construct file '%s' does not exist", constructFile);
+  SourceFile constructFile = SourceFile(args[0]);
+  if(!exists(constructFile.name)) {
+    writefln("Error: construct file '%s' does not exist", constructFile.name);
     return 1;
   }
 
-  //
-  // Find the correct loader based on the file extension
-  //
-  auto parser = getParser(constructFile);
+  auto parser = getParser(constructFile.name);
   if(!parser.name) {
-    writefln("Error: could not find a parser for file '%s'", constructFile);
+    writefln("Error: could not find a parser for file '%s'", constructFile.name);
     return 1; // fail
   }
-
   
-  writefln("[CONC] Loading constructs from '%s'...", constructFile);
-  stdout.flush();
-
-  auto constructCode = cast(string)read(constructFile);
-
-  const(Construct)[] sourceConstructs;
+  //writefln("[CONC] Loading constructs from '%s'...", constructFile.name);
+  //stdout.flush();
+  auto constructCode = cast(string)read(constructFile.name);
   try {
-    sourceConstructs = parser.func(constructCode);
+    constructFile.constructs = parser.func(constructCode);
   } catch(ConstructParseException e) {
-    if(e.lineNumber) {
-      writefln("Error in %s (line %s): %s", constructFile, e.lineNumber, e.msg);
+    if(e.constructLineNumber) {
+      writefln("%s(%s): ParseError: %s", constructFile.name, e.constructLineNumber, e.msg);
     } else {
-      writefln("Error in %s: %s", constructFile, e.msg);
+      writefln("%s: ParseError: %s", constructFile.name, e.msg);
     }
     return 1;
   }
 
-  Importer importer = Importer([ImportPath(buildNormalizedPath("..","std"), "std")]);
-  
-  writeln("[CONC] Done loading constructs. Processing them...");
-  stdout.flush();
-  BackendConstruct[] processedConstructs;
-  ProcessingData processingData;
-  {
-    try {
-      processedConstructs = processConstructs
-        (constructFile, &processingData.constructMap, &importer, sourceConstructs);
-      if(!processedConstructs) {
-        return 1; // fail
-      }
-    } catch(InvalidConstructException e) {
-      writefln("Error in '%s' line %s: %s", e.file, e.line, e.msg);
-      return 1; // fail
-    }
-  }
+  ProcessorState processorState = ProcessorState([ImportPath(buildNormalizedPath("..","std"), "std")]);
 
-  writefln("[CONC] Loaded '%s' constructs", processingData.constructMap.length);
-  
-  writeln("[CONC] Done processing constructs. Passing them to the backend...");
-  stdout.flush();
-  {
-    int result;
-    try {
-      result = executeBackend(constructFile, &processingData, processedConstructs);
-    } catch(InvalidConstructException e) {
-      if(e.line) {
-	writefln("Error in '%s' line %s: %s", e.file, e.line, e.msg);
-      } else {
-	writefln("Error in '%s': %s", e.file, e.msg);
+  //writeln("[CONC] Done loading constructs. Processing them...");
+  //stdout.flush();
+  try {
+    processConstructs(&processorState, constructFile);
+  } catch(SemanticException e) {
+    if(e.errorList.data.length) {
+      foreach(other; e.errorList.data) {
+	writefln("%s(%s): SemanticError: %s", other.file, other.line, other.msg);
       }
-      return 1; // fail
-    }
-    
-    if(result == 0) {
-      writeln("Success");
     } else {
-      writeln("FAIL");
+      writefln("%s(%s): SemanticError: %s", e.file, e.line, e.msg);
     }
-    return result;
+    //writeln(e);
+    return 1; // fail
+  } catch(ConstructParseException e) {
+    if(e.constructLineNumber) {
+      writefln("%s(%s): ParseError: %s", constructFile.name, e.constructLineNumber, e.msg);
+    } else {
+      writefln("%s: ParseError: %s", constructFile.name, e.msg);
+    }
+    return 1;
+  } catch(Exception e) {
+    stdout.flush();
+    writeln(e);
+    return 1; // fail
   }
+  
+  return 0;
 }

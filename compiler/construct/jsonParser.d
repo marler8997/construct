@@ -9,8 +9,15 @@ import std.json;
 import construct.ir;
 import construct.parser : ConstructParseException;
 
+private struct ParserState
+{
+  //const(char)[] filename;
+}
+
 const(Construct)[] parseConstructs(const(char)[] code)
 {
+  ParserState state = ParserState();
+  
   JSONValue[] constructsJson;
   try {
     auto jsonRoot = parseJSON(code);
@@ -53,22 +60,22 @@ const(Construct)[] parseConstructs(const(char)[] code)
     }
     */
 
-    constructs[i] = cast(Construct)toConstruct(constructJson);
+    constructs[i] = cast(Construct)toConstruct(&state, constructJson);
   }
   return constructs;
 }
 
 
 
-ConstructObject[] toConstructObjects(JSONValue[] values)
+ConstructObject[] toConstructObjects(ParserState* state, JSONValue[] values)
 {
   ConstructObject[] objects = new ConstructObject[values.length];
   foreach(i; 0..values.length) {
-    objects[i] = cast(ConstructObject)toConstructObject(values[i]);
+    objects[i] = cast(ConstructObject)toConstructObject(state, values[i]);
   }
   return objects;
 }
-ConstructObject toConstructObject(JSONValue valueJson)
+ConstructObject toConstructObject(ParserState* state, JSONValue valueJson)
 {
   if(valueJson.type == JSON_TYPE.STRING) {
     return ConstructObject.fromUnquoted(0, valueJson.str);
@@ -77,7 +84,7 @@ ConstructObject toConstructObject(JSONValue valueJson)
     return new LongLiteral(0, valueJson.integer);
   }
   if(valueJson.type == JSON_TYPE.ARRAY) {
-    return new ConstructList(0, toConstructObjects(valueJson.array));
+    return new ConstructList(0, toConstructObjects(state, valueJson.array));
   }
   if(valueJson.type == JSON_TYPE.OBJECT) {
     JSONValue[string] object = valueJson.object;
@@ -94,9 +101,9 @@ ConstructObject toConstructObject(JSONValue valueJson)
     }
     auto typeString = typeJson.str;
     if(typeString == "construct") {
-      return toConstruct(object);
+      return toConstruct(state, object);
     } else if(typeString == "type") {
-      return toPrimitiveType(object);
+      return toPrimitiveType(state, object);
     } else {
       throw new ConstructParseException
 	(0, format("unknown object type '%s'", typeJson.str));
@@ -107,7 +114,7 @@ ConstructObject toConstructObject(JSONValue valueJson)
     (0, format("unhandled json type '%s'", valueJson.type));
 }
 
-Construct toConstruct(JSONValue[string] json)
+Construct toConstruct(ParserState* state, JSONValue[string] json)
 {
   string name;
   {
@@ -137,13 +144,13 @@ Construct toConstruct(JSONValue[string] json)
 	throw new ConstructParseException
 	  (0, format("expected the 'args' property to be an ARRAY but is a(n) %s", argsJson.type));
       }
-      args = toConstructObjects(argsJson.array);
+      args = toConstructObjects(state, argsJson.array);
     }
   }
   return new Construct(0, name, args);
 }
 
-PrimitiveType toPrimitiveType(JSONValue[string] json)
+PrimitiveType toPrimitiveType(ParserState* state, JSONValue[string] json)
 {
   string name;
   {
