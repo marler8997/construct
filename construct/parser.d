@@ -17,7 +17,7 @@ class ConstructParseException : Exception
 struct SourceFile
 {
   const(char)[] name;
-  const(ConstructObject)[] codeTree = void;
+  const(ConstructObject)[] parsedObjects = void;
 }
 
 struct ConstructParser {

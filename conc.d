@@ -11,11 +11,8 @@ import std.format : formattedWrite;
 
 import utf8;
 import construct.ir;
-//import construct.backendIR;
 import construct.parser : SourceFile, getParser, ConstructParseException;
-//import construct.processor : ProcessorState, ImportPath, processConstructs, SemanticException, verbose;
-
-__gshared bool verbose;
+import construct.processor : verbose, ImportPath, ConstructProcessor, SemanticException;
 
 void usage(string program)
 {
@@ -59,7 +56,7 @@ int main(string[] args)
   //stdout.flush();
   auto constructCode = cast(string)read(constructFile.name);
   try {
-    constructFile.codeTree = parser.func(constructCode);
+    constructFile.parsedObjects = parser.func(constructCode);
   } catch(ConstructParseException e) {
     if(e.constructLineNumber) {
       writefln("%s(%s): ParseError: %s", constructFile.name, e.constructLineNumber, e.msg);
@@ -68,17 +65,18 @@ int main(string[] args)
     }
     return 1;
   }
-
-
   
-  /*
-  ProcessorState processorState = ProcessorState([ImportPath(buildNormalizedPath("..","std"), "std")]);
-
+  ConstructProcessor processor = ConstructProcessor
+    ([
+      //ImportPath(buildNormalizedPath("..","std"), "std"),
+      ImportPath(constructFile.name.dirName),
+      ]);
   //writeln("[CONC] Done loading constructs. Processing them...");
   //stdout.flush();
   try {
-    processConstructs(&processorState, constructFile);
+    processor.process(constructFile);
   } catch(SemanticException e) {
+    writeln(); // blank line
     if(e.errorList.data.length) {
       foreach(other; e.errorList.data) {
 	writefln("%s(%s): SemanticError: %s", other.file, other.line, other.msg);
@@ -89,17 +87,17 @@ int main(string[] args)
     //writeln(e);
     return 1; // fail
   } catch(ConstructParseException e) {
+    writeln(); // blank line
     if(e.constructLineNumber) {
       writefln("%s(%s): ParseError: %s", constructFile.name, e.constructLineNumber, e.msg);
     } else {
       writefln("%s: ParseError: %s", constructFile.name, e.msg);
     }
     return 1;
-  } catch(Exception e) {
-    stdout.flush();
+  } catch(ConstructException e) {
+    writeln(); // blank line
     writeln(e);
     return 1; // fail
   }
-  */
   return 0;
 }

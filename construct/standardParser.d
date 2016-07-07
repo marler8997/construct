@@ -1,4 +1,6 @@
 /*
+Grammar
+===========================================
 construct ::= ( object | named-object)*
 object ::= symbol | number | string | block | list | ';'
 named-object ::= (symbol | number | string) '=' object
@@ -17,17 +19,6 @@ import std.format : formattedWrite;
 import utf8;
 import construct.ir;
 import construct.parser : ConstructParseException;
-
-Exception imp(string feature = null, string file = __FILE__, size_t line = __LINE__) {
-  Exception e;
-  if(feature) {
-    e = new Exception(feature~": not implemented", file, line);
-  } else {
-    e = new Exception("not implemented", file, line);
-  }
-  throw e;
-  return e;
-}
 
 // A wrapper that will print any character in a human readable format
 // only using ascii characters
@@ -218,6 +209,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   //   }
   private final void parse(char context, ref T objects)
   {
+    
     while(true) {
       skipWhitespace();
       if(state.cpos >= limit) {
@@ -288,43 +280,29 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
       
       // Quoted Strings
       if(c == '"') {
-
         auto stringLineNumber = state.lineNumber;
-	auto next = state.next;
-	while(true) {
-	  if(next >= limit) {
-	    throw new ConstructCFamilyParseException
-	      (ErrorType.endedEarly, state.lineNumber, "input ended inside a quoted string");
-	  }
-          auto cpos = next;
-	  c = decodeUtf8(&next, limit);
-	  if(c == '\\') {
-            imp("quoted strings with escapes");
-	  } else if(c == '"') {
-	    objects.put(new ConstructString(stringLineNumber, state.next[0..cpos-state.next]));
-	    state.next = next;
-	    break;
-	  }
-	}
+	auto string_ = parseQuoted();
+	objects.put(new ConstructString(stringLineNumber, string_));
 	continue;
       }
-
 
       if(isFirstCharacterOfSymbol(c)) {
         auto symbolLineNumber = state.lineNumber;
 	auto symbol = parseSymbol();
 	if(state.cpos >= limit) {
-	  objects.put(new ConstructSymbol(symbolLineNumber, symbol));
+	  objects.put(ConstructObject.fromUnquoted(symbolLineNumber, symbol));
 	  break;
 	}
 	state.next = state.cpos; // rewind
 	skipWhitespace();
 	if(state.cpos >= limit) {
-	  objects.put(new ConstructSymbol(symbolLineNumber, symbol));
+	  objects.put(ConstructObject.fromUnquoted(symbolLineNumber, symbol));
 	  break;
 	}
+        
 	if(state.c == '=') {
-	  imp("named objects");
+          objects.put(new ConstructNamedObject(symbolLineNumber, symbol, parseNamedObject()));
+	  state.next = state.cpos; // rewind
 	  continue;
 	}
 
@@ -346,6 +324,104 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
        format("expected '%s' but reached end of input", context));
   }
 
+  // InputState:
+  //   next points to char after '='
+  // OutputState:
+  //   cpos points to char after named object
+  //   if(cpos < limit) {
+  //     c contains char pointed to by cpos
+  //     next points to char after cpos
+  //   }
+  private final ConstructObject parseNamedObject()
+  {
+    while(true) {
+      skipWhitespace();
+      if(state.cpos >= limit) {
+        throw new ConstructCFamilyParseException
+          (ErrorType.endedEarly, state.lineNumber,
+           "expected object after '=' but reached end of input");
+      }
+    
+      auto c = state.c;
+      if(c == ';') {
+	readChar();
+        return new ObjectBreak(state.lineNumber);
+      }
+
+      if(c == '{') {
+        auto blockLineNumber = state.lineNumber;
+        auto blockObjects = T.init;
+        parse('}', blockObjects);
+	readChar();
+        return new ConstructBlock(blockLineNumber, blockObjects.done);
+      }
+
+      if(c == '(') {
+        auto listLineNumber = state.lineNumber;
+        auto listObjects = T.init;
+        parse(')', listObjects);
+	readChar();
+        return new ConstructList(listLineNumber, listObjects.done);
+      }
+
+      // Handle Comments
+      if(c == '/') {
+        auto commentLineNumber = state.lineNumber;
+        auto comment = parseComment();
+        if(keepComments) {
+          throw imp("keeping comments between '=' and named arg");
+        }
+        continue;
+      }
+      
+      // Quoted Strings
+      if(c == '"') {
+        auto stringLineNumber = state.lineNumber;
+	auto string_ = parseQuoted();
+	readChar();
+	return new ConstructString(stringLineNumber, string_);
+      }
+
+      if(isFirstCharacterOfSymbol(c)) {
+        auto symbolLineNumber = state.lineNumber;
+        auto symbol = parseSymbol();
+        return ConstructObject.fromUnquoted(symbolLineNumber, symbol);
+      }
+      
+      if(c == ',') {
+        throw new ConstructCFamilyParseException
+          (ErrorType.invalidChar, state.lineNumber, "commas ',' (or list breaks) can only appear inside lists");
+      }
+      throw new ConstructCFamilyParseException
+        (ErrorType.invalidChar, state.lineNumber,
+         format("named construct object cannot start with '%s'", AsciiPrint(c)));
+    }
+  }
+
+  // InputState:
+  //   next points to character after opening quote
+  // OutputState:
+  //   next points to character after closing quote
+  private final const(char)[] parseQuoted()
+  {
+    auto next = state.next;
+    while(true) {
+      if(next >= limit) {
+	throw new ConstructCFamilyParseException
+	  (ErrorType.endedEarly, state.lineNumber, "input ended inside a quoted string");
+      }
+      auto cpos = next;
+      auto c = decodeUtf8(&next, limit);
+      if(c == '\\') {
+	imp("quoted strings with escapes");
+      } else if(c == '"') {
+	auto string_ = state.next[0..cpos-state.next];
+	state.next = next;
+	return string_;
+      }
+    }
+  }
+  
   // InputState:
   //   cpos points to first character of symbol
   //   next points to character after c
@@ -541,6 +617,14 @@ unittest
   {
     return new ConstructString(lineNumber, value);
   }
+  ConstructNamedObject named(size_t lineNumber, string name, ConstructObject object)
+  {
+    return new ConstructNamedObject(lineNumber, name, object);
+  }
+  ConstructNull null_(size_t lineNumber)
+  {
+    return new ConstructNull(lineNumber);
+  }
 
   
   test("", []);
@@ -655,26 +739,60 @@ unittest
   test("a (c,d,e);", [symbol(1, "a"), list(1, symbol(1, "c"), listBreak,
                                            symbol(1, "d"), listBreak,
                                            symbol(1, "e")), break_]);
-  version(comment) {
+
   // Named Args
-  testError(ErrorType.endedEarly, "a b=");
-  testError(ErrorType.endedEarly, "a b =");
-  testError(ErrorType.endedEarly, "a b= ");
-  testError(ErrorType.endedEarly, "a b = ");
+  testError(ErrorType.endedEarly, "a=");
+  testError(ErrorType.endedEarly, "a= ");
+  testError(ErrorType.endedEarly, "a =");
+  testError(ErrorType.endedEarly, " a=");
+  testError(ErrorType.endedEarly, "a = ");
+  testError(ErrorType.endedEarly, " a =");
+  testError(ErrorType.endedEarly, " a = ");
+  testError(ErrorType.endedEarly, "a=//");
+  testError(ErrorType.endedEarly, "a=/**/");
+  testError(ErrorType.invalidChar, "a=,");
 
-  testError(ErrorType.endedEarly, "a b=c");
-  testError(ErrorType.endedEarly, "a b=c ");
-  testError(ErrorType.endedEarly, "a b= c");
-  testError(ErrorType.endedEarly, "a b =c");
-  testError(ErrorType.endedEarly, "a b= c ");
-  testError(ErrorType.endedEarly, "a b = c");
-  testError(ErrorType.endedEarly, "a b = c ");
+  test("a=;", [named(1, "a", break_)]);
+  test("a =;", [named(1, "a", break_)]);
+  test("a= ;", [named(1, "a", break_)]);
+  test("a={}", [named(1, "a", block(1))]);
+  test("a ={}", [named(1, "a", block(1))]);
+  test("a= { } ", [named(1, "a", block(1))]);
+  test("a = {b c} ", [named(1, "a", block(1, symbol(1, "b"), symbol(1, "c")))]);
+  test("a = { b c } ", [named(1, "a", block(1, symbol(1, "b"), symbol(1, "c")))]);
 
-  testError(ErrorType.endedEarly, "a b=()");
-  testError(ErrorType.endedEarly, "a b=(c d)");
-  testError(ErrorType.endedEarly, "a b={}");
-  testError(ErrorType.endedEarly, "a b=/");
-  testError(ErrorType.endedEarly, "a b=/hey");
+  test("a=()", [named(1, "a", list(1))]);
+  test("a =()", [named(1, "a", list(1))]);
+  test("a= ( ) ", [named(1, "a", list(1))]);
+  test("a = (b c) ", [named(1, "a", list(1, symbol(1, "b"), symbol(1, "c")))]);
+  test("a = ( b c ) ", [named(1, "a", list(1, symbol(1, "b"), symbol(1, "c")))]);
+  test("a = (b,c)", [named(1, "a", list(1, symbol(1, "b"), listBreak, symbol(1, "c")))]);
+
+  test("a=/*comment*/;", [named(1, "a", break_)]);
+  test("a=/*comment*/ ;", [named(1, "a", break_)]);
+  test("a=/*comment*/{}", [named(1, "a", block(1))]);
+  test("a=/*comment*/ {}", [named(1, "a", block(1))]);
+  test("a=/*comment*/()", [named(1, "a", list(1))]);
+  test("a=/*comment*/ ()", [named(1, "a", list(1))]);
+  test("a=/*comment*/b", [named(1, "a", symbol(1, "b"))]);
+  
+  test("a=//comment\n;", [named(1, "a", break_(2))]);
+  test("a=//comment\n ;", [named(1, "a", break_(2))]);
+  test("a=//comment\n{}", [named(1, "a", block(2))]);
+  test("a=//comment\n {}", [named(1, "a", block(2))]);
+  test("a=//comment\n()", [named(1, "a", list(2))]);
+  test("a=//comment\n ()", [named(1, "a", list(2))]);
+  test("a=//comment\nb", [named(1, "a", symbol(2, "b"))]);
+  
+  testError(ErrorType.endedEarly, "a=\"");
+  testError(ErrorType.endedEarly, "a=\" ");
+  test("a=\"a string!\";", [named(1, "a", string_(1, "a string!")), break_]);
+
+
+
+
+
+  /*
   testError(ErrorType.invalidChar, "a b=/!");
   testError(ErrorType.invalidChar, "a b=/\"");
   testError(ErrorType.invalidChar, "a b=/\"hello");
@@ -691,6 +809,12 @@ unittest
   test("a b=c;", [new Construct(1, "a", null, ["b": symbol(1, "c")])]);
   test("a b={};", [new Construct(1, "a", null, ["b": block(1, null)])]);
   test("a b=/hey;", [new Construct(1, "a", null, ["b": new Construct(1, "hey")])]);
-  }
+  */
+
+  // Regression Tests
+  test("null", [null_(1)]);
+  test("null;", [null_(1), break_]);
+  test("thrownError = null;", [named(1, "thrownError", null_(1)), break_]);
+  test("let thrownError = null;", [symbol(1, "let"), named(1, "thrownError", null_(1)), break_]);
 }
 

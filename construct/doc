@@ -1,0 +1,9 @@
+
+
+How to specify defcon parameters
+
+// First are the required parameters
+// They have a name (Not sure if making the name optional would be useful)
+// They have an optional type (If it's no type, then it accepts any type)
+
+

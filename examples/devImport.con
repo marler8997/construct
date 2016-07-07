@@ -1,0 +1,7 @@
+
+
+defcon aConstructDefinedInDevImport
+{
+  message "Called a construct defined in another file";
+}
+

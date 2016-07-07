@@ -21,4 +21,5 @@ todo {
   item CFrontEnd "Create a C Front end that will compile to Construct. Support C99, maybe C11. I don't think there's any reason to support a C89/C90/C95/C99 front end because I believe that any code written with those versions can be compiled by a C11 front end.";
   item UnitTestConstruct "Create a unittest construct that works similar to the D unittest block";
   item CSharpFrontEnd "Note: I might be able to use Roslyn to help create a C# front end";
+  item LookAtWhiley "Whiley does a cool thing where it has pre and post conditions on it's functions.  This is a great idea that construct should have in it's standard library.  It also has 'flow-typing' which means that it can determine a variable's type based on conditions in the control flow.";
 }
