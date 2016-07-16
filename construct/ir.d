@@ -52,12 +52,15 @@ T singleton(T, A...)(A args)
 
 enum PrimitiveTypeEnum {
   anything,
+
+  named,
+  
   void_,
   nullable,
   
   type,
 
-  symbol, // Used for construct names (think of more)
+  symbol,
 
   bool_,
   pointer,
@@ -109,10 +112,12 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
   [
    // NOTE: the anything type must have itself as it's parent
    PrimitiveTypeDefinition("anything" , PrimitiveTypeEnum.anything , PrimitiveTypeEnum.anything),
+   PrimitiveTypeDefinition("named"    , PrimitiveTypeEnum.named    , PrimitiveTypeEnum.anything),
    PrimitiveTypeDefinition("void"     , PrimitiveTypeEnum.void_    , PrimitiveTypeEnum.anything),
    PrimitiveTypeDefinition("nullable" , PrimitiveTypeEnum.nullable , PrimitiveTypeEnum.anything),
 
    PrimitiveTypeDefinition("type"     , PrimitiveTypeEnum.type     , PrimitiveTypeEnum.anything),
+
    PrimitiveTypeDefinition("symbol"   , PrimitiveTypeEnum.symbol   , PrimitiveTypeEnum.anything),
    
    PrimitiveTypeDefinition("bool"      , PrimitiveTypeEnum.bool_  , PrimitiveTypeEnum.anything),
@@ -159,12 +164,26 @@ bool canBe(PrimitiveTypeEnum typeEnum, PrimitiveTypeEnum canBeEnum)
   return typeEnum == canBeEnum ||
     (typeEnum != PrimitiveTypeEnum.anything && typeEnum.definition.parentTypeEnum.canBe(canBeEnum));
 }
-bool canBe(PrimitiveTypeEnum typeEnum, const(ConstructType) canBeType)
+bool canBe(PrimitiveTypeEnum typeEnum, ConstructType canBeType)
 {
-  if(PrimitiveType primitiveType = cast(PrimitiveType)canBeType) {
-    return typeEnum.canBe(primitiveType.typeEnum);
+  return typeEnum.canBe(canBeType.asPrimitive());
+}
+PrimitiveTypeEnum commonType(PrimitiveTypeEnum a, PrimitiveTypeEnum b)
+{
+  if(a == PrimitiveTypeEnum.anything || b == PrimitiveTypeEnum.anything) {
+    return PrimitiveTypeEnum.anything;
   }
-  throw new Exception("canBe non primitive type not implemented");
+  if(canBe(b, a)) {
+    return a;
+  }
+  if(canBe(a, b)) {
+    return b;
+  }
+  auto result = commonType(a, b.definition.parentTypeEnum);
+  if(result != PrimitiveTypeEnum.anything) {
+    return result;
+  }
+  return commonType(a.definition.parentTypeEnum, b);
 }
 
 unittest
@@ -208,18 +227,23 @@ interface ISymbolObject
   
   @property inout(ConstructObject) asOneConstructObject() inout;
 
-  @property inout(ConstructDefinition) asConstructDefinition() inout;
-  @property inout(ConstructType) asConstructType() inout;
-  @property inout(ConstructString) asConstructString() inout;
-  @property inout(ConstructSymbol) asConstructSymbol() inout;
-  @property inout(ConstructBool) asConstructBool() inout;
-  @property inout(ConstructBlock) asConstructBlock() inout;
-  @property inout(ConstructList) asConstructList() inout;
+  @property inout(ConstructDefinition)  asConstructDefinition() inout;
+  @property inout(ConstructType)        asConstructType() inout;
+  @property inout(ConstructString)      asConstructString() inout;
+  @property inout(ConstructUtf8)        asConstructUtf8() inout;
+  @property inout(ConstructSymbol)      asConstructSymbol() inout;
+  @property inout(ConstructBool)        asConstructBool() inout;
+  @property inout(ConstructNumber)      asConstructNumber() inout;
+  @property inout(ConstructUint)        asConstructUint() inout;
+  @property inout(ConstructBlock)       asConstructBlock() inout;
+  @property inout(ConstructList)        asConstructList() inout;
   @property inout(ConstructNamedObject) asNamedObject() inout;
 
   @property string typeName() const;
 
   bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const;
+
+  const(ISymbolObject) member(const(char)[] memberName) const;
 }
 
 inout(T) as(T)(inout(ISymbolObject) obj)
@@ -228,14 +252,46 @@ inout(T) as(T)(inout(ISymbolObject) obj)
     return obj.asConstructDefinition;
   } else static if( is ( T == ConstructString ) ) {
     return obj.asConstructString;
+  } else static if( is ( T == ConstructUtf8 ) ) {
+    return obj.asConstructUtf8;
   } else static if( is ( T == ConstructSymbol ) ) {
     return obj.asConstructSymbol;
   } else static if( is ( T == ConstructBlock ) ) {
     return obj.asConstructBlock;
+  } else static if( is ( T == ConstructList ) ) {
+    return obj.asConstructList;
   } else static if( is ( T == ConstructType ) ) {
     return obj.asConstructType;
   } else static if( is ( T == ConstructBool ) ) {
     return obj.asConstructBool;
+  } else static if( is ( T == ConstructNumber ) ) {
+    return obj.asConstructNumber;
+  } else static if( is ( T == ConstructUint ) ) {
+    return obj.asConstructUint;
+  } else static assert(0, "the as(ISymbolObject) template does not support type: "~T.staticTypeName);
+}
+inout(T) typedMember(T)(inout(ISymbolObject) obj, const(char)[] memberName)
+{
+  static if( is ( T == ConstructDefinition ) ) {
+    throw imp();
+  } else static if( is ( T == ConstructString ) ) {
+    throw imp();
+  } else static if( is ( T == ConstructUtf8 ) ) {
+    throw imp();
+  } else static if( is ( T == ConstructSymbol ) ) {
+    throw imp();
+  } else static if( is ( T == ConstructBlock ) ) {
+    throw imp();
+  } else static if( is ( T == ConstructList ) ) {
+    throw imp();
+  } else static if( is ( T == ConstructType ) ) {
+    throw imp();
+  } else static if( is ( T == ConstructBool ) ) {
+    throw imp();
+  } else static if( is ( T == ConstructNumber ) ) {
+    throw imp();
+  } else static if( is ( T == ConstructUint ) ) {
+    throw imp();
   } else static assert(0, "the as(ISymbolObject) template does not support type: "~T.staticTypeName);
 }
 
@@ -258,6 +314,10 @@ struct An
       sink(name);
     }
   }
+}
+An an(T)(T enumValue) if( is( T == enum) )
+{
+  return An(to!string(enumValue));
 }
 
 
@@ -289,8 +349,8 @@ class ConstructDefinition : ISymbolObject
 {
   const size_t lineNumber;
   @property final size_t getLineNumber() const { return lineNumber; }
-  
-  const(char)[] name;
+
+  const(char)[] filename;
   ConstructAttributes attributes;
   ConstructType evalTo;
   const(ConstructParam)[] requiredParams;
@@ -299,14 +359,12 @@ class ConstructDefinition : ISymbolObject
   enum staticTypeName = "construct";
   @property
   string typeName() const { return "construct"; }
-
   
-  this(size_t lineNumber, const(char)[] name, ConstructAttributes attributes, ConstructType evalTo,
-       const(ConstructParam)[] requiredParams,
-       const(ConstructOptionalParam)[] optionalParams)
+  this(size_t lineNumber, const(char)[] filename, ConstructAttributes attributes, ConstructType evalTo,
+       const(ConstructParam)[] requiredParams, const(ConstructOptionalParam)[] optionalParams)
   {
     this.lineNumber = lineNumber;
-    this.name = name;
+    this.filename = filename;
     this.attributes = attributes;
     this.evalTo = evalTo;
     this.requiredParams = requiredParams;
@@ -317,26 +375,34 @@ class ConstructDefinition : ISymbolObject
   {
     throw imp("ConstructDefinition asOneConstructObject");
   }
+  
+  final override const(ISymbolObject) member(const(char)[] memberName) const
+  {
+    return null;
+  }
 
   @property
   final inout(ConstructDefinition) asConstructDefinition() inout
   {
     return this;
   }
-  @property final inout(ConstructType) asConstructType() inout { return null; }
-  @property final inout(ConstructString) asConstructString() inout { return null; }
-  @property final inout(ConstructSymbol) asConstructSymbol() inout { return null; }
-  @property final inout(ConstructBool) asConstructBool() inout { return null; }
-  @property final inout(ConstructBlock) asConstructBlock() inout { return null; }
-  @property final inout(ConstructList) asConstructList() inout { return null; }
+  @property final inout(ConstructType)        asConstructType() inout { return null; }
+  @property final inout(ConstructString)      asConstructString() inout { return null; }
+  @property final inout(ConstructUtf8)        asConstructUtf8() inout { return null; }
+  @property final inout(ConstructSymbol)      asConstructSymbol() inout { return null; }
+  @property final inout(ConstructBool)        asConstructBool() inout { return null; }
+  @property final inout(ConstructNumber)      asConstructNumber() inout { return null; }
+  @property final inout(ConstructUint)        asConstructUint() inout { return null; }
+  @property final inout(ConstructBlock)       asConstructBlock() inout { return null; }
+  @property final inout(ConstructList)        asConstructList() inout { return null; }
   @property final inout(ConstructNamedObject) asNamedObject() inout { return null; }
 
   bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const
   {
     throw imp("ConstructDefinition equals");
   }
-  abstract ProcessResult process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                 const(ConstructObject)[] objects, size_t argIndex) const;
+  abstract const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+                                          const(ConstructObject)[] objects, size_t* argIndex) const;
 }
 class TypeDefinition : ISymbolObject
 {
@@ -359,16 +425,24 @@ class TypeDefinition : ISymbolObject
 
   @property final inout(ConstructObject) asOneConstructObject() inout { return cast(inout(ConstructObject))type; }
 
+  final override const(ISymbolObject) member(const(char)[] memberName) const
+  {
+    return null;
+  }
+
   @property final inout(ConstructDefinition) asConstructDefinition() inout { return null; }
   @property final inout(ConstructType) asConstructType() inout
   {
     return cast(inout(ConstructType))type;
   }
-  @property final inout(ConstructString) asConstructString() inout { return null; }
-  @property final inout(ConstructSymbol) asConstructSymbol() inout { return null; }
-  @property final inout(ConstructBool) asConstructBool() inout { return null; }
-  @property final inout(ConstructBlock) asConstructBlock() inout { return null; }
-  @property final inout(ConstructList) asConstructList() inout { return null; }
+  @property final inout(ConstructString)      asConstructString() inout { return null; }
+  @property final inout(ConstructUtf8)        asConstructUtf8() inout { return null; }
+  @property final inout(ConstructSymbol)      asConstructSymbol() inout { return null; }
+  @property final inout(ConstructBool)        asConstructBool() inout { return null; }
+  @property final inout(ConstructNumber)      asConstructNumber() inout { return null; }
+  @property final inout(ConstructUint)        asConstructUint() inout { return null; }
+  @property final inout(ConstructBlock)       asConstructBlock() inout { return null; }
+  @property final inout(ConstructList)        asConstructList() inout { return null; }
   @property final inout(ConstructNamedObject) asNamedObject() inout { return null; }
 
   bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const
@@ -392,12 +466,26 @@ abstract class ConstructObject : ISymbolObject
     this.lineNumber = lineNumber;
   }
 
-  @property
   enum primitiveTypeEnum = PrimitiveTypeEnum.anything;
   enum staticTypeName = "anything";
-  abstract void toString(scope void delegate(const(char)[]) sink) const;
-  abstract bool canBe(const(ConstructType) canBeType) const;
+  @property abstract PrimitiveTypeEnum primitiveType() const;
 
+  abstract void toString(scope void delegate(const(char)[]) sink) const;
+
+  final bool canBe(PrimitiveTypeEnum typeEnum) const
+  {
+    return primitiveType().canBe(typeEnum);
+  }
+  final bool canBe(const(ConstructObject) object) const
+  {
+    return primitiveType().canBe(object.primitiveType());
+  }
+  final bool canBe(const(ConstructType) type) const
+  {
+    return primitiveType().canBe(type.asPrimitive());
+  }
+
+  
   @property
   final bool isObjectBreak() const
   {
@@ -409,17 +497,25 @@ abstract class ConstructObject : ISymbolObject
     return typeid(this) is typeid(ListBreak);
   }
 
+  override const(ISymbolObject) member(const(char)[] memberName) const
+  {
+    return null;
+  }
+
   // True if the object returns an immediate value.
   // Used for the processOneConstruct method.
-  @property abstract bool isOneImmediateValue() const;
+  //@property abstract bool isOneImmediateValue() const;
   
   @property final inout(ConstructObject) asOneConstructObject() inout { return this; }
 
   @property inout(ConstructDefinition)  asConstructDefinition() inout { return null; }
   @property inout(ConstructType)        asConstructType()       inout { return null; }
   @property inout(ConstructString)      asConstructString()     inout { return null; }
+  @property inout(ConstructUtf8)        asConstructUtf8()       inout { return null; }
   @property inout(ConstructSymbol)      asConstructSymbol()     inout { return null; }
   @property inout(ConstructBool)        asConstructBool()       inout { return null; }
+  @property inout(ConstructNumber)      asConstructNumber()     inout { return null; }
+  @property inout(ConstructUint)        asConstructUint()       inout { return null; }
   @property inout(ConstructBlock)       asConstructBlock()      inout { return null; }
   @property inout(ConstructList)        asConstructList()       inout { return null; }
   @property inout(ConstructNamedObject) asNamedObject()         inout { return null; }
@@ -462,27 +558,20 @@ abstract class ConstructType : ConstructObject
   }
   enum staticTypeName = "type";
   enum primitiveTypeEnum = PrimitiveTypeEnum.type;
-  abstract bool canBe(PrimitiveTypeEnum canBeEnum) const;
-  override bool canBe(const(ConstructType) canBeType) const
-  {
-    return PrimitiveTypeEnum.type.canBe(canBeType);
-  }
+  @property final override PrimitiveTypeEnum primitiveType() const { return primitiveTypeEnum; }
 
-  @property final override bool isOneImmediateValue() const
-  {
-    return true;
-  }
+  @property abstract PrimitiveTypeEnum asPrimitive() const;
   @property final override inout(ConstructType) asConstructType() inout { return this; }
   
-  @property
-  bool isVoid() { return false; }
+  //@property bool isVoid() { return false; }
 }
 
 PrimitiveType create(PrimitiveTypeEnum typeEnum, size_t lineNumber)
 {
   return new PrimitiveType(lineNumber, typeEnum);
 }
-class PrimitiveType : ConstructType {
+class PrimitiveType : ConstructType
+{
   PrimitiveTypeEnum typeEnum;
   this(size_t lineNumber, PrimitiveTypeEnum typeEnum)
   {
@@ -493,6 +582,7 @@ class PrimitiveType : ConstructType {
   {
     return to!string(typeEnum);
   }
+  @property final override PrimitiveTypeEnum asPrimitive() const { return typeEnum; }
   override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink(to!string(typeEnum));
@@ -505,21 +595,26 @@ class PrimitiveType : ConstructType {
     auto other = cast(PrimitiveType)otherObj;
     return other && this.typeEnum == other.typeEnum;
   }
-  override bool canBe(PrimitiveTypeEnum canBeEnum) const
-  {
-    return typeEnum.canBe(canBeEnum);
-  }
+  /*
   final override bool isVoid()
   {
     return typeEnum == PrimitiveTypeEnum.void_;
   }
+  */
 }
-class ConstructReferenceType : ConstructType {
+class ConstructReferenceType : ConstructType
+{
   const(char)[] constructName;
   this(size_t lineNumber, const(char)[] constructName) {
     super(lineNumber);
     this.constructName = constructName;
   }
+  enum staticTypeName = "construct";
+  final string typeName() const
+  {
+    return staticTypeName;
+  }
+  @property final override PrimitiveTypeEnum asPrimitive() const { return PrimitiveTypeEnum.construct; }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink("(construct ");
@@ -535,13 +630,61 @@ class ConstructReferenceType : ConstructType {
   {
     return this.constructName == other.constructName;
   }
-  override bool canBe(const(ConstructType) canBeType) const
-  {
-    return PrimitiveTypeEnum.construct.canBe(canBeType);
-  }
   // TODO: create an abstract method that returns the default value
 }
-
+class ConstructTypedListType : ConstructType
+{
+  const(ConstructType) itemType;
+  this(size_t lineNumber, const(ConstructType) itemType) {
+    super(lineNumber);
+    this.itemType = itemType;
+  }
+  enum staticTypeName = "list";
+  final string typeName() const
+  {
+    return staticTypeName;
+  }
+  @property final override PrimitiveTypeEnum asPrimitive() const { return PrimitiveTypeEnum.list; }
+  final override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    sink("listOf ");
+    itemType.toString(sink);
+  }
+  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const
+  {
+    auto other = cast(ConstructTypedListType)otherObj;
+    return other && equals(other, checkLineNumber);
+  }
+  final bool equals(const(ConstructTypedListType) other, bool checkLineNumber = true) const
+  {
+    if(checkLineNumber && lineNumber != other.getLineNumber) {
+      return false;
+    }
+    return this.itemType == other.itemType;
+  }
+}
+/*
+class ConstructVoid : ConstructObject
+{
+  this(size_t lineNumber)
+  {
+    super(lineNumber);
+  }
+  final string typeName() const { return "void"; }
+  @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.void_; }
+  override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    sink("void");
+  }
+  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const
+  {
+    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
+      return false;
+    }
+    return cast(ConstructVoid)otherObj !is null;
+  }
+}
+*/
 class ConstructNull : ConstructObject
 {
   this(size_t lineNumber)
@@ -552,10 +695,7 @@ class ConstructNull : ConstructObject
   {
     return "nullable";
   }
-  @property final override bool isOneImmediateValue() const
-  {
-    return true;
-  }
+  @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.nullable; }
   override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink("null");
@@ -567,9 +707,34 @@ class ConstructNull : ConstructObject
     }
     return cast(ConstructNull)otherObj !is null;
   }
-  override bool canBe(const(ConstructType) canBeType) const
+}
+
+class ConstructPointer : ConstructObject
+{
+  void* pointer;
+  this(size_t lineNumber, void* pointer)
   {
-    return PrimitiveTypeEnum.nullable.canBe(canBeType);
+    super(lineNumber);
+    this.pointer = pointer;
+  }
+
+  enum primitiveTypeEnum = PrimitiveTypeEnum.pointer;
+  enum staticTypeName = "pointer";
+  final string typeName() const { return staticTypeName; }
+  @property final override PrimitiveTypeEnum primitiveType() const { return primitiveTypeEnum; }
+  
+  //@property final override inout(ConstructPointer) asConstructPointer() inout { return this; }
+  final override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    formattedWrite(sink, "%s", pointer);
+  }
+  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const
+  {
+    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
+      return false;
+    }
+    auto other = cast(ConstructPointer)otherObj;
+    return other && this.pointer == other.pointer;
   }
 }
 
@@ -583,14 +748,9 @@ class ConstructBool : ConstructObject
   }
   enum primitiveTypeEnum = PrimitiveTypeEnum.bool_;
   enum staticTypeName = "bool";
-  final string typeName() const
-  {
-    return "bool";
-  }
-  @property final override bool isOneImmediateValue() const
-  {
-    return true;
-  }
+  final string typeName() const { return staticTypeName; }
+  @property final override PrimitiveTypeEnum primitiveType() const { return primitiveTypeEnum; }
+  
   @property final override inout(ConstructBool) asConstructBool() inout { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
@@ -604,9 +764,55 @@ class ConstructBool : ConstructObject
     auto other = cast(ConstructBool)otherObj;
     return other && this.value == other.value;
   }
-  override bool canBe(const(ConstructType) canBeType) const
+}
+
+
+class ConstructNumber : ConstructObject
+{
+  this(size_t lineNumber)
   {
-    return PrimitiveTypeEnum.bool_.canBe(canBeType);
+    super(lineNumber);
+  }
+  @property final override inout(ConstructNumber) asConstructNumber() inout { return this; }
+
+  abstract const(ConstructNumber) add(const(ConstructNumber) other) const;
+
+  
+}
+class ConstructUint : ConstructNumber
+{
+  size_t value;
+  this(size_t lineNumber, size_t value)
+  {
+    super(lineNumber);
+    this.value = value;
+  }
+  enum primitiveTypeEnum = PrimitiveTypeEnum.uint_;
+  enum staticTypeName = "uint";
+  final string typeName() const
+  {
+    return "uint";
+  }
+  @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.uint_; }
+  @property final override inout(ConstructUint) asConstructUint() inout { return this; }
+  final override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    formattedWrite(sink, "%s", value);
+  }
+  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const
+  {
+    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
+      return false;
+    }
+    auto other = cast(ConstructUint)otherObj;
+    return other && this.value == other.value;
+  }
+  final override const(ConstructNumber) add(const(ConstructNumber) other) const
+  {
+    if(auto otherUint = other.asConstructUint) {
+      return new ConstructUint(0, value + otherUint.value);
+    }
+    throw imp(format("add %s to %s", typeName, other.typeName));
   }
 }
 
@@ -614,27 +820,32 @@ class ConstructBool : ConstructObject
 // A construct string is explicitly a string.  It cannot be a symbol.
 class ConstructString : ConstructObject
 {
+  this(size_t lineNumber)
+  {
+    super(lineNumber);
+  }
+  enum primitiveTypeEnum = PrimitiveTypeEnum.string;
+  enum staticTypeName = "string";
+  @property final override inout(ConstructString) asConstructString() inout { return this; }
+
+  abstract const(char)[] toUtf8() const;
+  abstract size_t stringByteLength(PrimitiveTypeEnum type);
+}
+class ConstructUtf8 : ConstructString
+{
   const(char)[] value;
   this(size_t lineNumber, const(char)[] value)
   {
     super(lineNumber);
     this.value = value;
   }
-  enum primitiveTypeEnum = PrimitiveTypeEnum.string;
-  enum staticTypeName = "string";
-  final string typeName() const
-  {
-    return "string";
-  }
-  @property final override bool isOneImmediateValue() const
-  {
-    return true;
-  }
-  @property
-  override inout(ConstructString) asConstructString() inout
-  {
-    return this;
-  }
+  enum primitiveTypeEnum = PrimitiveTypeEnum.utf8;
+  enum staticTypeName = "utf8";
+  final string typeName() const { return staticTypeName; }
+  @property final override PrimitiveTypeEnum primitiveType() const { return primitiveTypeEnum; }
+  
+  @property final override inout(ConstructUtf8) asConstructUtf8() inout { return this; }
+  
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink(`"`);
@@ -646,12 +857,26 @@ class ConstructString : ConstructObject
     if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
       return false;
     }
-    auto other = cast(ConstructString)otherObj;
+    auto other = cast(ConstructUtf8)otherObj;
     return other && this.value == other.value;
   }
-  override bool canBe(const(ConstructType) canBeType) const
+  final override const(ISymbolObject) member(const(char)[] memberName) const
   {
-    return PrimitiveTypeEnum.string.canBe(canBeType);
+    if(memberName == "length") {
+      return new ConstructUint(0, value.length);
+    }
+    return null;
+  }
+  override const(char)[] toUtf8() const
+  {
+    return value;
+  }
+  override size_t stringByteLength(PrimitiveTypeEnum type)
+  {
+    if(type == PrimitiveTypeEnum.utf8) {
+      return value.length;
+    }
+    throw imp(format("ConstructUtf8 stringByteLength(%s)", type));
   }
 }
 
@@ -701,12 +926,8 @@ class ConstructSymbol : ConstructObject
   {
     return "symbol";
   }
-  @property final override bool isOneImmediateValue() const
-  {
-    return false;
-  }
-  @property
-  final override inout(ConstructSymbol) asConstructSymbol() inout { return this; }
+  @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.symbol; }
+  @property final override inout(ConstructSymbol) asConstructSymbol() inout { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink(value);
@@ -719,12 +940,36 @@ class ConstructSymbol : ConstructObject
     auto other = cast(ConstructSymbol)otherObj;
     return other && this.value == other.value;
   }
-  override bool canBe(const(ConstructType) canBeType) const
+}
+/*
+class ConstructSymbolRef : ConstructObject
+{
+  const ConstructSymbol symbol;
+  this(size_t lineNumber, const(ConstructSymbol) symbol)
   {
-    return PrimitiveTypeEnum.symbol.canBe(canBeType);
+    super(lineNumber);
+    this.symbol = symbol;
+  }
+  enum staticTypeName = "symbolRef";
+  @property final string typeName() const { return staticTypeName; }
+
+  @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.symbolRef; }
+  @property final override inout(ConstructSymbolRef) asConstructSymbolRef() inout { return this; }
+  final override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    sink("ref ");
+    sink(symbol.value);
+  }
+  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const
+  {
+    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
+      return false;
+    }
+    auto other = cast(ConstructSymbolRef)otherObj;
+    return other && this.symbol == other.symbol;
   }
 }
-
+*/
 class ConstructComment : ConstructObject
 {
   const(char)[] value;
@@ -738,10 +983,7 @@ class ConstructComment : ConstructObject
   {
     return "comment";
   }
-  @property final override bool isOneImmediateValue() const
-  {
-    return false;
-  }
+  @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.void_; }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink("/*");
@@ -756,43 +998,7 @@ class ConstructComment : ConstructObject
     auto other = cast(ConstructComment)otherObj;
     return other && this.value == other.value;
   }
-  override bool canBe(const(ConstructType) canBeType) const
-  {
-    throw new Exception("not implemented");
-    //return PrimitiveTypeEnum.comment.canBe(canBeType);
-  }
 }
-/*
-class LongLiteral : ConstructObject
-{
-  long value;
-  this(size_t lineNumber, long value)
-  {
-    super(lineNumber);
-    this.value = value;
-  }
-  final string typeName() const
-  {
-    return "long";
-  }
-  override void toString(scope void delegate(const(char)[]) sink) const
-  {
-    formattedWrite(sink, "%s", value);
-  }
-  override bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const
-  {
-    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
-      return false;
-    }
-    auto other = cast(LongLiteral)otherObj;
-    return other && this.value == other.value;
-  }
-  override bool canBe(const(ConstructType) canBeType) const
-  {
-    return PrimitiveTypeEnum.uint_.canBe(canBeType);
-  }
-}
-*/
 class ObjectBreak : ConstructObject
 {
   this(size_t lineNumber)
@@ -804,10 +1010,7 @@ class ObjectBreak : ConstructObject
   {
     return "[object-break]";
   }
-  @property final override bool isOneImmediateValue() const
-  {
-    return true;
-  }
+  @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.anything; }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink(";");
@@ -818,10 +1021,6 @@ class ObjectBreak : ConstructObject
       return false;
     }
     return cast(ObjectBreak)otherObj !is null;
-  }
-  override bool canBe(const(ConstructType) canBeType) const
-  {
-    return PrimitiveTypeEnum.anything.canBe(canBeType);
   }
 }
 class ListBreak : ConstructObject
@@ -835,10 +1034,7 @@ class ListBreak : ConstructObject
   {
     return "[list-break]";
   }
-  @property final override bool isOneImmediateValue() const
-  {
-    return true;
-  }
+  @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.anything; }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink(",");
@@ -857,29 +1053,37 @@ class ListBreak : ConstructObject
     }
     return true;
   }
-  override bool canBe(const(ConstructType) canBeType) const
-  {
-    return PrimitiveTypeEnum.anything.canBe(canBeType);
-  }
 }
 
 class ConstructList : ConstructObject
 {
   const(ConstructObject)[] items;
+  PrimitiveTypeEnum itemType;
   this(size_t lineNumber, const(ConstructObject)[] items = null)
   {
     super(lineNumber);
     this.items = items;
+
+    // Get item type
+    if(items.length == 0) {
+      itemType = PrimitiveTypeEnum.anything;
+    } else {
+      itemType = items[0].primitiveType;
+      for(size_t i = 1; i < items.length; i++) {
+	if(itemType == PrimitiveTypeEnum.anything) {
+	  break;
+	}
+	auto item = items[i];
+	itemType = commonType(itemType, item.primitiveType);
+      }
+    }
   }
   enum staticTypeName = "list";
   final string typeName() const
   {
     return "list";
   }
-  @property final override bool isOneImmediateValue() const
-  {
-    return false;
-  }
+  @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.list; }
   @property final override inout(ConstructList) asConstructList() inout { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
@@ -914,10 +1118,6 @@ class ConstructList : ConstructObject
     }
     return true;
   }
-  override bool canBe(const(ConstructType) canBeType) const
-  {
-    throw new Exception("not implemented");
-  }
 }
 
 
@@ -930,15 +1130,12 @@ class ConstructBlock : ConstructObject
     this.objects = objects;
   }
   enum primitiveTypeEnum = PrimitiveTypeEnum.constructBlock;
-  enum staticTypeName = "construct-block";
+  enum staticTypeName = "constructBlock";
   final string typeName() const
   {
-    return "construct-block";
+    return "constructBlock";
   }
-  @property final override bool isOneImmediateValue() const
-  {
-    return false;
-  }
+  @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.constructBlock; }
   @property final override inout(ConstructBlock) asConstructBlock() inout { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
@@ -975,10 +1172,6 @@ class ConstructBlock : ConstructObject
     }
     return true;
   }
-  override bool canBe(const(ConstructType) canBeType) const
-  {
-    return PrimitiveTypeEnum.constructBlock.canBe(canBeType);
-  }
 }
 
 class ConstructNamedObject : ConstructObject
@@ -997,10 +1190,7 @@ class ConstructNamedObject : ConstructObject
   {
     return "named-object";
   }
-  @property final override bool isOneImmediateValue() const
-  {
-    return false;
-  }
+  @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.named; }
   @property final override inout(ConstructNamedObject) asNamedObject() inout { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
@@ -1020,10 +1210,5 @@ class ConstructNamedObject : ConstructObject
       return false;
     }
     return name == other.name && object.equals(other.object);
-  }
-  override bool canBe(const(ConstructType) canBeType) const
-  {
-    throw imp("ConstructNamedObject.canBe");
-    //return PrimitiveTypeEnum.constructBlock.canBe(canBeType);
   }
 }

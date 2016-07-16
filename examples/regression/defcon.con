@@ -1,0 +1,74 @@
+// -*-mode: c;-*-
+// Enables Syntax Highlighting for github and emacs
+import "util";
+
+expectFail
+{
+  defcon "constructNameCantBeString" {}
+}
+expectFail
+{
+  defcon badArg ("paramCantBeString") {}
+}
+
+defcon example1() { }
+example1
+//expectFail {
+//  example1 "no";
+//}
+
+defcon example2(x) { }
+example2 true
+example2 false
+example2 "hello"
+expectFail {
+  example2 aSymbol // aSymbol does not exist
+}
+
+defcon example3(x string) { }
+example3 "hello"
+expectFail {example3 aSymbol;}
+expectFail {example3 true;}
+expectFail {example3 false;}
+
+defcon example4(x bool) { }
+example4 true
+example4 false
+expectFail {example4 "hello";}
+expectFail {example4 aSymbol;}
+
+defcon example5(x,y) { }
+example5 true false
+//expectFail {
+//  example5 aSymbol;
+//}
+
+defcon example6(x bool,y) { }
+example6 true false
+example6 true "string"
+expectFail {
+  example6 true aSymbol // aSymbol does not exist
+}
+
+defcon example7(x bool, y symbol) { }
+example7 true aSymbol
+//expectFail {
+//example7 true "string";
+//}
+
+
+//
+// How to define a construct with a symbol reference variable
+//
+{
+  let mydefconname toSymbolRef adefcon;
+  defcon resolveSymbolRef mydefconname { }
+  adefcon
+}
+{
+  defcon defcon2 (name symbol) {
+    defcon resolveSymbolRef name { }
+  }
+  defcon2 myCoolDefcon { }
+  myCoolDefcon
+}

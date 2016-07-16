@@ -1,0 +1,17 @@
+// -*-mode: c;-*-
+// Enables Syntax Highlighting for github and emacs
+message "A simple message";
+
+{
+  message "Message inside a block";
+}
+{
+  let x "Message set in a variable";
+  message x;
+}
+{
+  let x "Message set in another block using same variable";
+  message x;
+  set x "Message using same variable set to another value";
+  message x;
+}

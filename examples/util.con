@@ -1,0 +1,53 @@
+// -*-mode: c;-*-
+// Enables Syntax Highlighting for github and emacs
+
+defcon ignore (code constructBlock)
+{
+  // do nothing, so all code will be ignored
+}
+ignore
+{
+  should be ignored ( however, this, will still need valid syntax )
+}
+
+//defcon message (msg string);
+defcon message;
+
+// Create a construct that makes sure it gets a failure
+// The addSymbolsToParentScope means that the construct block will
+// add any new symbols to the parent scope.
+defcon expectFail (code constructBlock)
+{
+  let thrownError null;
+
+  try /*addSymbolsToParentScope=true*/ code
+  catch error {
+    message "Caught expected error: " error;
+    set thrownError error;
+  }
+  if equals thrownError null {
+    throw "expected failure but did not get it";
+  }
+}
+
+expectFail
+{
+  throw "expectFail should catch this";
+}
+
+expectFail { expectFail; }
+
+// Make sure expectFail fails when there is no exception
+// TODO: this isn't quite working as intended, the catch will catch
+//       both cases right now
+{
+  let failed false;
+  try {
+    expectFail { /* no error */ }
+  } catch error {
+    set failed true;
+  }
+  if not failed {
+    throw "expectFail did not fail on success";
+  }
+}

@@ -1,0 +1,16 @@
+
+
+defcon message;
+
+//
+// Implement the Generic Parsing Definition Construct
+//
+//deftype parser;
+defcon defineParser (name symbol, code constructBlock) /*returns=parser*/ {
+  message "defineParser not implemented";
+  exec code;
+}
+
+defineParser unsignedParser {
+  let result typed unsigned 0;
+}

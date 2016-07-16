@@ -1,0 +1,96 @@
+// -*-mode: c;-*-
+// Enables Syntax Highlighting for github and emacs
+import "util";
+
+expectFail {
+  foreach
+}
+expectFail {
+  foreach (a in (1 2))
+}
+expectFail {
+  foreach () {}
+}
+expectFail {
+  foreach ("string") {}
+}
+expectFail {
+  foreach (item) {}
+}
+expectFail {
+  foreach (index,) {}
+}
+expectFail {
+  foreach (index,"notSymbol") {}
+}
+expectFail {
+  foreach (index,item) {}
+}
+expectFail {
+  foreach (index,item "what") {}
+}
+expectFail {
+  foreach (item "what") {}
+}
+expectFail {
+  foreach (index,item false) {}
+}
+expectFail {
+  foreach (item false) {}
+}
+expectFail {
+  foreach (index,item in) {}
+}
+expectFail {
+  foreach (item in) {}
+}
+expectFail {
+  foreach (index,item in () "extra") {}
+}
+expectFail {
+  foreach (item in () "extra") {}
+}
+expectFail {
+  foreach (index,item in null) {}
+}
+expectFail {
+  foreach (item in null) {}
+}
+expectFail {
+  foreach (index,item in "notList") {}
+}
+expectFail {
+  foreach (item in "notList") {}
+}
+expectFail {
+  foreach (index,item in true) {}
+}
+expectFail {
+  foreach (item in true) {}
+}
+
+foreach (item in ("first" "second")) {
+  message "foreach: " item;
+}
+foreach (index, item in ("first" "second")) {
+  message "foreach[" index "] " item;
+}
+
+{
+  let items ("first" "second");
+  foreach (item in items) {
+    message "foreach: " item;
+  }
+  foreach (index, item in items) {
+    message "foreach[" index "] " item;
+  }
+}
+
+defcon printList(items list) {
+  foreach(index, item in items) {
+    message "foreach[" index "] " item;
+  }
+}
+printList ("first" "second")
+
+

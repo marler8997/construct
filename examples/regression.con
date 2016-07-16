@@ -1,0 +1,9 @@
+// -*-mode: c;-*-
+// Enables Syntax Highlighting for github and emacs
+
+import "regression/import";
+import "regression/setlet";
+import "regression/basics";
+import "regression/defcon";
+import "regression/foreach";
+

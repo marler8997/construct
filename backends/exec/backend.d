@@ -1,13 +1,13 @@
 module backend;
 
-import std.stdio  : write, writeln, writefln, File, stdout;
+import std.stdio  : write, writef, writeln, writefln, File, stdout;
 import std.file   : mkdir, exists, setExtension, baseName;
 import std.path   : dirName, buildNormalizedPath;
 import std.string : format;
 import std.conv   : to;
 
 import construct.ir;
-import construct.processor : ConstructProcessor, ProcessResult, ProcessorFunc, ConstructDefinition;
+import construct.processor : ConstructProcessor, ProcessResult, ProcessorFunc, ConstructDefinition, logDev;
 
 ProcessorFunc loadConstructBackend(const(char)[] name)
 {
@@ -22,6 +22,9 @@ ProcessorFunc loadConstructBackend(const(char)[] name)
 }
 ConstructType loadBackendType(const(char)[] name)
 {
+  if(name == "string") {
+    return singleton!PrimitiveType(0, PrimitiveTypeEnum.utf8);
+  }
   if(name == "systemString") {
     return singleton!PrimitiveType(0, PrimitiveTypeEnum.utf8);
   }
@@ -30,30 +33,36 @@ ConstructType loadBackendType(const(char)[] name)
   }
   return null;
 }
-ProcessResult messageHandler(ConstructProcessor* processor,
-                             const(ConstructDefinition) definition,
-                             const(ConstructSymbol) constructSymbol,
-                             const(ConstructObject)[] objects, size_t argIndex)
+const(ConstructObject) messageHandler(ConstructProcessor* processor,
+                                      const(ConstructDefinition) definition,
+                                      const(ConstructSymbol) constructSymbol,
+                                      const(ConstructObject)[] objects, size_t* argIndex)
 {
   while(true) {
-    if(argIndex >= objects.length) {
-      throw processor.endedInsideConstruct(constructSymbol);
+    auto object = processor.consumeValue(constructSymbol, objects, argIndex);
+    if(object is null) {
+      throw processor.semanticError(constructSymbol.lineNumber, "the message construct does not handle void statements");
     }
-    auto object = objects[argIndex++];
     if(object.isObjectBreak) {
       break;
+    } else if(auto string_ = object.asConstructUtf8) {
+      write(string_.value);
+    } else if(auto number = object.asConstructUint) {
+      writef("%s", number.value);
+    } else if(auto bool_ = object.asConstructBool) {
+      write(bool_.value ? "true" : "false");
     } else {
-      write(processor.resolveTo!ConstructString(object).value);
+      throw imp(format("message printing object of type %s", object.typeName));
     }
   }
   writeln();
   stdout.flush();
-  return ProcessResult(argIndex, null);
+  return null;
 }
-ProcessResult openFileHandler(ConstructProcessor* processor,
-			      const(ConstructDefinition) definition,
-			      const(ConstructSymbol) constructSymbol,
-			      const(ConstructObject)[] objects, size_t argIndex)
+const(ConstructObject) openFileHandler(ConstructProcessor* processor,
+                                       const(ConstructDefinition) definition,
+                                       const(ConstructSymbol) constructSymbol,
+                                       const(ConstructObject)[] objects, size_t* argIndex)
 {
   throw imp("openFileHandler");
 }

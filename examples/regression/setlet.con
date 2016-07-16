@@ -1,0 +1,26 @@
+// -*-mode: c;-*-
+// Enables Syntax Highlighting for github and emacs
+import "util";
+
+expectFail {
+  set x 3 // expected error: x doesn't exist
+}
+/*
+expectFail {
+  let x unhandledValue // value is unhandled
+}
+expectFail {
+  set x missingSemiColon
+}
+*/
+
+{
+  let x "hello";
+}
+
+{
+  let x {let y 0};
+}
+{
+  let x (let y 0);
+}

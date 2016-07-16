@@ -15,6 +15,7 @@ import std.array  : appender, Appender;
 import std.file   : read, exists, mkdir, baseName, dirName, buildNormalizedPath;
 import std.string : format;
 import std.format : formattedWrite;
+import std.conv   : to;
 
 import utf8;
 import construct.ir;
@@ -88,8 +89,7 @@ private bool isFirstCharacterOfSymbol(dchar c)
     if(c < 'a') return c == '_';
     return c <= 'z';
   }
-  if(c < '0') return c == '-';
-  return (c <= '9');
+  return c == '-';
 }
 private bool isSymbolCharacter(dchar c)
 {
@@ -282,8 +282,17 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
       if(c == '"') {
         auto stringLineNumber = state.lineNumber;
 	auto string_ = parseQuoted();
-	objects.put(new ConstructString(stringLineNumber, string_));
+	objects.put(new ConstructUtf8(stringLineNumber, string_));
 	continue;
+      }
+
+      // Numbers
+      if(c >= '0' && c <= '9') {
+        auto numberLineNumber = state.lineNumber;
+        auto numberString = parseNumber();
+        objects.put(new ConstructUint(numberLineNumber, to!size_t(numberString)));
+        state.next = state.cpos; // rewind
+        continue;
       }
 
       if(isFirstCharacterOfSymbol(c)) {
@@ -379,7 +388,14 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
         auto stringLineNumber = state.lineNumber;
 	auto string_ = parseQuoted();
 	readChar();
-	return new ConstructString(stringLineNumber, string_);
+	return new ConstructUtf8(stringLineNumber, string_);
+      }
+
+      // Numbers
+      if(c >= '0' && c <= '9') {
+        auto numberLineNumber = state.lineNumber;
+        auto numberString = parseNumber();
+        return new ConstructUint(numberLineNumber, to!size_t(numberString));
       }
 
       if(isFirstCharacterOfSymbol(c)) {
@@ -418,6 +434,34 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
 	auto string_ = state.next[0..cpos-state.next];
 	state.next = next;
 	return string_;
+      }
+    }
+  }
+
+  // InputState:
+  //   cpos points to first digit
+  //   next points to character after first digit
+  // OutputState:
+  //   cpos points to character after number
+  //   if(cpos < limit) {
+  //     c is first character after number
+  //     next points to character after c
+  //   }
+  private final const(char)[] parseNumber()
+  {
+    auto start = state.cpos;
+    auto next = state.next;
+    while(true) {
+      if(next >= limit) {
+        state.cpos = limit;
+        return start[0..limit-start];
+      }
+      auto cpos = next;
+      auto c = decodeUtf8(&next, limit);
+      if(c < '0' || c > '9') {
+        state.cpos = cpos;
+        state.c = c;
+        return start[0..cpos-start];
       }
     }
   }
@@ -664,7 +708,8 @@ unittest
   for(uint i = 0; i < 128; i++) {
     if(!isFirstCharacterOfSymbol(i) &&
        i != ' ' && i != '\t' && i != '\r' && i != '\n' &&
-       i != '/' && i != '(' && i != '{' && i != ';' && i != '"') {
+       i != '/' && i != '(' && i != '{' && i != ';' && i != '"' &&
+       !(i >= '0' && i <= '9')) {
       char c = cast(char)i;
       testError(ErrorType.invalidChar, (cast(char*)&c)[0..1]);
     }
@@ -816,5 +861,36 @@ unittest
   test("null;", [null_(1), break_]);
   test("thrownError = null;", [named(1, "thrownError", null_(1)), break_]);
   test("let thrownError = null;", [symbol(1, "let"), named(1, "thrownError", null_(1)), break_]);
+
+  // Numbers
+  test("0", [new ConstructUint(1, 0)]);
+  test(" 0", [new ConstructUint(1, 0)]);
+  test("0 ", [new ConstructUint(1, 0)]);
+  test("1", [new ConstructUint(1, 1)]);
+  test("2", [new ConstructUint(1, 2)]);
+  test("3", [new ConstructUint(1, 3)]);
+  test("4", [new ConstructUint(1, 4)]);
+  test("5", [new ConstructUint(1, 5)]);
+  test("6", [new ConstructUint(1, 6)]);
+  test("7", [new ConstructUint(1, 7)]);
+  test("8", [new ConstructUint(1, 8)]);
+  test("9", [new ConstructUint(1, 9)]);
+  test("10", [new ConstructUint(1, 10)]);
+  test(" 10", [new ConstructUint(1, 10)]);
+  test("10 ", [new ConstructUint(1, 10)]);
+
+  test("a=0", [named(1, "a", new ConstructUint(1, 0))]);
+  test("a=0 ", [named(1, "a", new ConstructUint(1, 0))]);
+  test("a= 0", [named(1, "a", new ConstructUint(1, 0))]);
+  test("a =0", [named(1, "a", new ConstructUint(1, 0))]);
+  test(" a=0", [named(1, "a", new ConstructUint(1, 0))]);
+  test("a= 0 ", [named(1, "a", new ConstructUint(1, 0))]);
+  test("a =0 ", [named(1, "a", new ConstructUint(1, 0))]);
+  test(" a=0 ", [named(1, "a", new ConstructUint(1, 0))]);
+  test("a= 0", [named(1, "a", new ConstructUint(1, 0))]);
+  test("a = 0", [named(1, "a", new ConstructUint(1, 0))]);
+  test(" a= 0", [named(1, "a", new ConstructUint(1, 0))]);
+  test("a =0", [named(1, "a", new ConstructUint(1, 0))]);
+  test(" a =0", [named(1, "a", new ConstructUint(1, 0))]);
 }
 
