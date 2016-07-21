@@ -67,7 +67,9 @@ example7 true aSymbol
 }
 {
   defcon defcon2 (name symbol) {
-    defcon resolveSymbolRef name { }
+    addSymbolsToCaller {
+      defcon resolveSymbolRef name { }
+    }
   }
   defcon2 myCoolDefcon { }
   myCoolDefcon

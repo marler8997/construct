@@ -5,6 +5,8 @@ defcon item (name string, description string) (dependsOn string) {}
 defcon todo (items /list item) {}
 
 todo {
+  item ConstructDefinition "Create some way to specify a construct pattern.  Maybe a regex/grammar type of data structure.  Once this is done, I should be able to consume construct objects with the pattern, and generate code that will process and/or emit constructs."
+  item EmitAndProcess "Develop the concept of emitting constructs, and processing them."
   item ChangeDefconToScope "Instead of having a global construct map, I need to add the constructs to the symbol map in the scope.";
   item EvaluateTo dependsOn=(NamedParams) "Implement the evaulateTo parameter on constructs.";
   item ExecBackend "Create a backend that will execute construct.  This will be needed to implement the semantics construct.";

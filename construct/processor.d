@@ -27,6 +27,7 @@ import std.conv   : to;
 
 import core.stdc.stdlib : malloc, free;
 
+import construct.patterns : Pattern, undefinedPattern;
 import construct.ir;
 import construct.parser : SourceFile, ConstructParser, standardParser, ConstructParseException;
 
@@ -210,7 +211,8 @@ struct Scope
   // If true, then symbols inside the scope can see symbols outside the scope
   bool open;
   // If true, the symbols defined in this scope will be added to the parent scope
-  bool addSymbolsToParentScope;
+  //bool addSymbolsToParentScope;
+  Scope* addSymbolsTo;
 
   SymbolTable symbols;
 }
@@ -237,6 +239,8 @@ struct ConstructProcessor
        "defcon"     : SymbolEntryList(singleton!DefconConstructDefinition()),
        "deftype"    : SymbolEntryList(singleton!DeftypeConstructDefinition()),
        "toSymbolRef": SymbolEntryList(singleton!ToSymbolRefConstructDefinition()),
+       //"callerScope": SymbolEntryList(singleton!CallerScopeConstructDefinition()),
+       "addSymbolsToCaller": SymbolEntryList(singleton!AddSymbolsToCallerConstructDefinition()),
        "exec"       : SymbolEntryList(singleton!ExecConstructDefinition()),
        "throw"      : SymbolEntryList(singleton!ThrowConstructDefinition()),
        "try"        : SymbolEntryList(singleton!TryConstructDefinition()),
@@ -258,14 +262,27 @@ struct ConstructProcessor
        "not"        : SymbolEntryList(singleton!NotConstructDefinition()),
        "add"        : SymbolEntryList(singleton!AddConstructDefinition()),
        "return"     : SymbolEntryList(singleton!ReturnConstructDefinition()),
+
+       //
+       // Classes
+       //
+       "defclass"   : SymbolEntryList(singleton!DefclassConstructDefinition()),
+
+       
        "semantics"  : SymbolEntryList(singleton!SemanticsConstructDefinition()),
+       "dumpScopeStack" : SymbolEntryList(singleton!DumpScopeStackConstructDefinition()),
        ];
   }
 
-  void pushScope(size_t startLineNumber, ScopeType type, bool openScope, bool addSymbolsToParent)
+  void pushScope(size_t startLineNumber, ScopeType type, bool openScope)
   {
     scopeStack.put(currentScope);
-    currentScope = Scope(startLineNumber, type, openScope, addSymbolsToParent);
+    currentScope = Scope(startLineNumber, type, openScope);
+  }
+  void pushScope(Scope existingScope)
+  {
+    scopeStack.put(currentScope);
+    currentScope = existingScope;
   }
   void popScope()
   {
@@ -336,9 +353,16 @@ struct ConstructProcessor
 
   void addSymbol(const(char)[] symbol, const(ISymbolObject) object)
   {
-    auto entry = currentScope.symbols.get(symbol, SymbolEntryList(null));
+    Scope* addTo;
+    if(currentScope.addSymbolsTo) {
+      addTo = currentScope.addSymbolsTo;
+    } else {
+      addTo = &currentScope;
+    }
+
+    auto entry = addTo.symbols.get(symbol, SymbolEntryList(null));
     if(!entry.first) {
-      currentScope.symbols[symbol] = SymbolEntryList(object.unconst);
+      addTo.symbols[symbol] = SymbolEntryList(object.unconst);
       logDebug("Added symbol '%s' to current scope", symbol);
     } else {
       throw imp(format("multiple symbol objects with the same name (trying to add symbol '%s')", symbol));
@@ -510,7 +534,7 @@ struct ConstructProcessor
     auto prefix = "";
     size_t scopeNumber = 0;
     foreach(scope_; scopeStack.data) {
-      writefln("%sScope %s (%s symbols)", prefix, scopeNumber, scope_.symbols.length);
+      writefln("%sScope %s (type=%s %s symbols)", prefix, scopeNumber, scope_.type, scope_.symbols.length);
       prefix ~= "  ";
       foreach(symbol; scope_.symbols.byKeyValue) {
         writefln("%s%s : %s", prefix, symbol.key, symbol.value);
@@ -518,7 +542,7 @@ struct ConstructProcessor
       prefix ~= "  ";
       scopeNumber++;
     }
-    writefln("%sScope %s (%s symbols)", prefix, scopeNumber, currentScope.symbols.length);
+    writefln("%sScope %s (type=%s %s symbols)", prefix, scopeNumber, currentScope.type, currentScope.symbols.length);
     prefix ~= "  ";
     foreach(symbol; currentScope.symbols.byKeyValue) {
       writefln("%s%s : %s", prefix, symbol.key, symbol.value);
@@ -553,43 +577,59 @@ struct ConstructProcessor
     currentFile = sourceFile;
     scope(exit) { currentFile = previousFile; }
 
-    pushScope(1, ScopeType.file, false, false);
+    pushScope(1, ScopeType.file, false);
     try {
-      process(sourceFile.parsedObjects, null);
+      auto result = processBlock(sourceFile.parsedObjects);
+      if(result) {
+        if(auto return_ = result.asConstructReturn) {
+          throw semanticError(result.lineNumber, "can only return inside a construct");
+        }
+        throw semanticError(result.lineNumber, "unhandled expression at root level");
+      }
       return currentScope.symbols;
     } finally {
       popScope();
     }
   }
-  const(ConstructObject) process(const(ConstructObject)[] objects, const(ConstructDefinition) insideConstruct)
+  const(ConstructObject) processConstructImplementationBlock(const(ConstructObject)[] objects, const(ConstructDefinition) constructDefinition)
   {
-    ConstructDefinition previousConstruct;
-    if(insideConstruct) {
-      previousConstruct = currentConstruct;
-      currentConstruct = insideConstruct.unconst;
-    }
+    ConstructDefinition previousConstruct = currentConstruct;
+    currentConstruct = constructDefinition.unconst;
     scope(exit) {
-      if(insideConstruct) {
-        currentConstruct = previousConstruct;
+      currentConstruct = previousConstruct;
+    }
+    auto result = processBlock(objects);
+    if(result) {
+      if(auto return_ = result.asConstructReturn) {
+        return return_.returnValue;
       }
     }
-    
+    return result;
+  }
+  const(ConstructObject) processBlock(const(ConstructObject)[] objects)
+  {
     size_t index = 0;
     size_t lineNumber = 0;
     while(index < objects.length) {
-      lineNumber = objects[index].lineNumber;
-      auto object = consumeValueAlreadyCheckedIndex(objects, &index);
-      if(object !is null) {
-        if(auto block = object.asConstructBlock) {
-          pushScope(block.lineNumber, ScopeType.block, true, false);
-          scope(exit) { popScope(); }
-          return process(block.objects, null);
-        } else {
-          //if(object.lineNumber) {
-          //lineNumber = result.object.lineNumber;
-          //}
-          throw semanticError(lineNumber, format("unhandled statement value (type %s)", object.typeName));
+      ConstructObject result;
+      
+      auto rawObject = objects[index];
+      if(auto block = rawObject.asConstructBlock) {
+        pushScope(block.lineNumber, ScopeType.block, true);
+        scope(exit) { popScope(); }
+        result = processBlock(block.objects).unconst;
+        index++;
+      } else {
+        lineNumber = rawObject.lineNumber;
+        result = consumeValueAlreadyCheckedIndex(objects, &index).unconst;
+      }
+      
+      if(result) {
+        if(auto return_ = result.asConstructReturn) {
+          return return_;
         }
+        throw semanticError(result.lineNumber, format
+                            ("unhandled statement value (type %s)", result.typeName));
       }
     }
     return null;
@@ -746,12 +786,12 @@ unittest
   }
   
 
-  auto valueObj = new ConstructString(1, "mysymbol string value");
+  auto valueObj = new ConstructUtf8(1, "mysymbol string value");
   processor.addSymbol("mysymbol", valueObj);
 
   testLookup(valueObj, "mysymbol");
 
-  processor.pushScope(2, ScopeType.block, true, false);
+  processor.pushScope(2, ScopeType.block, true);
   testLookup(valueObj, "mysymbol");
   processor.popScope();
 
@@ -760,14 +800,14 @@ unittest
   //
   // Test openScope
   //
-  processor.pushScope(2, true, false);
+  processor.pushScope(2, true);
   assert(valueObj == processor.tryLookupSymbol("mysymbol"));
   processor.popScope();
   
   //
   // Test addSymbolsToParentScope
   //
-  processor.pushScope(3, false, true);
+  processor.pushScope(3, false);
   assert(!processor.tryLookupSymbol("mysymbol"));
 
   auto goToParentObj = new ConstructString(1, "the value of goToParent");
@@ -787,11 +827,13 @@ alias ProcessorFunc = const(ConstructObject) function(ConstructProcessor* proces
 class FunctionConstructDefinition : ConstructDefinition
 {
   ProcessorFunc func;
-  this(size_t lineNumber, const(char)[] filename, ConstructAttributes attributes,
-       ConstructType evalTo, const(ConstructParam)[] requiredParams,
+  this(const Pattern pattern, size_t lineNumber, const(char)[] filename,
+       ConstructAttributes attributes, ConstructType evalTo,
+       const(ConstructParam)[] requiredParams,
        const(ConstructOptionalParam)[] optionalParams, ProcessorFunc func)
   {
-    super(lineNumber, filename, attributes, evalTo, requiredParams, optionalParams);
+    super(pattern, lineNumber, filename, attributes,
+	  evalTo, requiredParams, optionalParams);
     this.func = func;
   }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
@@ -804,11 +846,12 @@ class FunctionConstructDefinition : ConstructDefinition
 class ConstructWithBlockDefinition : ConstructDefinition
 {
   const ConstructBlock block;
-  this(size_t lineNumber, const(char)[] filename, ConstructAttributes attributes,
+  this(const Pattern pattern, size_t lineNumber, const(char)[] filename, ConstructAttributes attributes,
        ConstructType evalTo, const(ConstructParam)[] requiredParams,
        const(ConstructOptionalParam)[] optionalParams, const(ConstructBlock) block)
   {
-    super(lineNumber, filename, attributes, evalTo, requiredParams, optionalParams);
+    super(pattern, lineNumber, filename, attributes,
+	  evalTo, requiredParams, optionalParams);
     this.block = block;
   }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
@@ -817,8 +860,7 @@ class ConstructWithBlockDefinition : ConstructDefinition
     logDebug("entering scope for construct '%s' defined on line %s (%s required args)",
              constructSymbol.value, lineNumber, requiredParams.length);
     processor.pushScope(lineNumber, ScopeType.defcon,
-                        cast(bool)(attributes & ConstructAttribute.openScope),
-                        cast(bool)(attributes & ConstructAttribute.addSymbolsToParentScope));
+                        cast(bool)(attributes & ConstructAttribute.openScope));
     scope(exit) {processor.popScope();}
 
     //
@@ -858,7 +900,7 @@ class ConstructWithBlockDefinition : ConstructDefinition
 	processor.addSymbol(requiredParam.name, object);
       }
     }
-    return processor.process(block.objects, this);
+    return processor.processConstructImplementationBlock(block.objects, this);
   }
 }
 
@@ -866,7 +908,7 @@ class ImportConstructDefinition : ConstructDefinition
 {
   this()
   {
-    super(0, null, ConstructAttributes.init, null, null, null);
+    super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null);
   }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
@@ -964,7 +1006,7 @@ const(ConstructParam)[] parseRequiredParams(ConstructProcessor* processor, const
 
 class DefconConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1003,7 +1045,7 @@ class DefconConstructDefinition : ConstructDefinition
     //
     if(implementation) {
       processor.addSymbol(constructName, new ConstructWithBlockDefinition
-                          (lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, implementation));
+                          (undefinedPattern, lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, implementation));
     } else {
       auto backendFunc = loadConstructBackend(constructName);
       if(backendFunc == null) {
@@ -1011,7 +1053,7 @@ class DefconConstructDefinition : ConstructDefinition
                                       ("the backend does not implement construct '%s'", constructName));
       }
       processor.addSymbol(constructName, new FunctionConstructDefinition
-                          (lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, backendFunc));
+                          (undefinedPattern, lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, backendFunc));
     }
     return null;
   }
@@ -1019,7 +1061,7 @@ class DefconConstructDefinition : ConstructDefinition
 
 class DeftypeConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1048,26 +1090,71 @@ class DeftypeConstructDefinition : ConstructDefinition
 }
 class ToSymbolRefConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     return processor.consumeSymbol(constructSymbol, objects, argIndex);
   }
 }
-class ExecConstructDefinition : ConstructDefinition
+class AddSymbolsToCallerConstructDefinition : ConstructDefinition
+{
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+                                                const(ConstructObject)[] objects, size_t* argIndex) const
+  {
+    auto code = processor.consumeTypedValue!ConstructBlock(constructSymbol, objects, argIndex);
+
+    Scope* addSymbolsTo;
+    if(processor.currentScope.type == ScopeType.defcon) {
+      addSymbolsTo = &processor.scopeStack.data[processor.scopeStack.data.length-1];
+    } else {
+      throw imp("non root level addSymbolsToCaller");
+    }
+
+    processor.pushScope(code.lineNumber, ScopeType.block, true);
+    scope(exit) { processor.popScope(); }
+    processor.currentScope.addSymbolsTo = addSymbolsTo;
+
+    return processor.processBlock(code.objects);
+  }
+}
+/*
+class CallerScopeConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
+    //auto forwardList = 
     auto code = processor.consumeTypedValue!ConstructBlock(constructSymbol, objects, argIndex);
-    return processor.process(code.objects, null);
+    
+    if(processor.currentScope.type == ScopeType.defcon) {
+      auto saveScope = processor.currentScope;
+      processor.popScope();
+      scope(exit) { processor.pushScope(saveScope); }
+
+      return processor.processBlock(code.objects);
+    } else {
+      processor.printScopeStack();
+      throw imp("callerScope construct when currentScope is not defcon type");
+    }
+  }
+}
+*/
+class ExecConstructDefinition : ConstructDefinition
+{
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+                                                const(ConstructObject)[] objects, size_t* argIndex) const
+  {
+    auto code = processor.consumeTypedValue!ConstructBlock(constructSymbol, objects, argIndex);
+    return processor.processBlock(code.objects);
   }
 }
 class ThrowConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1077,7 +1164,7 @@ class ThrowConstructDefinition : ConstructDefinition
 }
 class TryConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1110,22 +1197,21 @@ class TryConstructDefinition : ConstructDefinition
     }
 
     try {
-      auto resultObject = processor.process(code.objects, null);
-      return null;
+      return processor.processBlock(code.objects);
     } catch(ConstructException e) {
-      processor.pushScope(catchBlock.lineNumber, ScopeType.block, true, false);
+      processor.pushScope(catchBlock.lineNumber, ScopeType.block, true);
       scope(exit) { processor.popScope(); }
 
       if(catchSymbol) {
 	processor.addSymbol(catchSymbol.value, new ConstructUtf8(0, e.msg));
       }
-      return processor.process(catchBlock.objects, null);
+      return processor.processBlock(catchBlock.objects);
     }
   }
 }
 class LetConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1147,7 +1233,7 @@ class LetConstructDefinition : ConstructDefinition
 }
 class SetConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1169,7 +1255,7 @@ class SetConstructDefinition : ConstructDefinition
 }
 class LetSetConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1192,7 +1278,7 @@ class LetSetConstructDefinition : ConstructDefinition
 
 class IfConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1200,9 +1286,9 @@ class IfConstructDefinition : ConstructDefinition
     auto trueCase = processor.consumeTypedValue!ConstructBlock(constructSymbol, objects, argIndex);
     ConstructObject resultObject = null;
     if(condition.value) {
-      processor.pushScope(trueCase.lineNumber, ScopeType.block, true, false);
+      processor.pushScope(trueCase.lineNumber, ScopeType.block, true);
       scope(exit) { processor.popScope(); }
-      return processor.process(trueCase.objects, null).unconst;
+      return processor.processBlock(trueCase.objects).unconst;
     } else {
       return null;
     }
@@ -1212,7 +1298,7 @@ class IfConstructDefinition : ConstructDefinition
 
 class EqualsConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.bool_), null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.bool_), null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1230,7 +1316,7 @@ class EqualsConstructDefinition : ConstructDefinition
 }
 class ListOfConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.list), null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.list), null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1240,7 +1326,7 @@ class ListOfConstructDefinition : ConstructDefinition
 }
 class TypeOfConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.type), null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.type), null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1253,7 +1339,7 @@ class TypeOfConstructDefinition : ConstructDefinition
 }
 class ItemTypeConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.type), null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.type), null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1264,18 +1350,18 @@ class ItemTypeConstructDefinition : ConstructDefinition
 }
 class TypedConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto type = processor.consumeTypedValue!ConstructType(constructSymbol, objects, argIndex);
-    //auto result = 
-    throw imp("typed construct");
+    auto value = processor.consumeValue(constructSymbol, objects, argIndex);
+    return value.typedAs(type);
   }
 }
 class ForEachConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1335,7 +1421,7 @@ class ForEachConstructDefinition : ConstructDefinition
     }
     
     if(list.items.length > 0) {
-      processor.pushScope(forEachCode.lineNumber, ScopeType.block, true, false);
+      processor.pushScope(forEachCode.lineNumber, ScopeType.block, true);
       ConstructUint indexObject = null;
       scope(exit) { processor.popScope(); }
       if(indexVar) {
@@ -1344,13 +1430,23 @@ class ForEachConstructDefinition : ConstructDefinition
       }
       processor.addSymbol(itemVar, list.items[0]);
       
-      processor.process(forEachCode.objects, null);
+      auto firstResult = processor.processBlock(forEachCode.objects);
+      if(firstResult) {
+	if(auto return_ = firstResult.asConstructReturn) {
+	  return firstResult;
+	}
+      }
       foreach(listObject; list.items[1..$]) {
         processor.setSymbol(constructSymbol.lineNumber, itemVar, listObject);
         if(indexObject) {
           indexObject.value++;
         }
-        processor.process(forEachCode.objects, null);
+        auto result = processor.processBlock(forEachCode.objects);
+	if(result) {
+	  if(auto return_ = result.asConstructReturn) {
+	    return result;
+	  }
+	}
       }
     }
 
@@ -1359,7 +1455,7 @@ class ForEachConstructDefinition : ConstructDefinition
 }
 class MallocConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1369,7 +1465,7 @@ class MallocConstructDefinition : ConstructDefinition
 }
 class StringByteLengthConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.uint_), null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.uint_), null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1381,7 +1477,7 @@ class StringByteLengthConstructDefinition : ConstructDefinition
 /*
 class StringAllocConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1407,7 +1503,7 @@ class StringAllocConstructDefinition : ConstructDefinition
 */
 class StrcpyConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1420,7 +1516,7 @@ class StrcpyConstructDefinition : ConstructDefinition
 }
 class MemcpyConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1429,7 +1525,7 @@ class MemcpyConstructDefinition : ConstructDefinition
 }
 class NotConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.bool_), null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.bool_), null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1445,7 +1541,7 @@ class NotConstructDefinition : ConstructDefinition
 }
 class AddConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1456,28 +1552,58 @@ class AddConstructDefinition : ConstructDefinition
 }
 class ReturnConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.anything), null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.anything), null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
-    throw imp("return construct");
+    auto next = processor.consumeValue(constructSymbol, objects, argIndex);
+    ConstructObject returnValue = null;
+    if(!next.isObjectBreak) {
+      returnValue = next.unconst;
+      processor.consumeTypedValue!ObjectBreak(constructSymbol, objects, argIndex);
+    }
+    return new ConstructReturn(constructSymbol.lineNumber, returnValue);
   }
 }
 class StructConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     throw imp("struct construct");
   }
 }
+
+
+
+class DefclassConstructDefinition : ConstructDefinition
+{
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+                                                const(ConstructObject)[] objects, size_t* argIndex) const
+  {
+    throw imp("defclass");
+  }
+}
+
+
 class SemanticsConstructDefinition : ConstructDefinition
 {
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
   final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     throw imp("semantics construct");
+  }
+}
+class DumpScopeStackConstructDefinition : ConstructDefinition
+{
+  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+                                                const(ConstructObject)[] objects, size_t* argIndex) const
+  {
+    processor.printScopeStack();
+    return null;
   }
 }

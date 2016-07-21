@@ -1,16 +1,68 @@
-
+// -*-mode: c;-*-
+// Enables Syntax Highlighting for github and emacs
 
 defcon message;
+
+/*
+defclass MyClass;
+
+addMethod MyClass print;
+
+let myClass MyClass;
+callMethod myClass print
+*/
+
 
 //
 // Implement the Generic Parsing Definition Construct
 //
 //deftype parser;
 defcon defineParser (name symbol, code constructBlock) /*returns=parser*/ {
-  message "defineParser not implemented";
-  exec code;
+
+  createClass resolveSymbolRef name;
+
+  addMethod resolveSymbolRef name;
+  defcon endOfInput {
+    return false;
+  }
+  defcon consumeChar {
+    return 10;
+  }
+  defcon needMoreInput {
+    throw "needMoreInput not implemented";
+  }
+  
+  // requireChar, gets the next character, the parser expects that
+  // the character will occur and input has not ended
+  defcon requireChar {
+    if endOfInput {
+      return needMoreInput
+    }
+    return consumeChar;
+  }
+
+  addSymbolsToCaller {
+    //let resolveSymbolRef name parser;
+    let resolveSymbolRef name code;
+  }
+  //exec code
+}
+
+/*
+defcon parse (parserName symbol) {
+  exec 
+  //exec resolveSymbolRef parserName;
+}
+*/
+defcon parseString (parser constructBlock, value string) {
+  exec parser
 }
 
 defineParser unsignedParser {
-  let result typed unsigned 0;
+  //let result typed unsigned 0;
+  let result 0;
+  let c requireChar;
 }
+
+message "here";
+parseString unsignedParser "a string!"

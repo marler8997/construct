@@ -62,7 +62,6 @@ and also defines the interface to the construct implementation.
 // It also returns nothing.
 import-pattern ::= string* break
 
-
 // the 'let' construct: grammar definition
 let-pattern ::= symbol object break?
 
@@ -72,6 +71,8 @@ message-pattern ::= anything* break
 // the 'try' construct grammar definition
 try-pattern :: block ('catch' block)? ('finally' block)?
 
+// the 'return' construct
+return-patter :: value? break
 
 
 

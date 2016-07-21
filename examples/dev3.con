@@ -1,0 +1,17 @@
+// -*-mode: c;-*-
+// Enables Syntax Highlighting for github and emacs
+
+//
+// Function Constructs
+//
+
+defcon message;
+//defcon function(name symbol);
+
+
+
+defcon mainFunction(argsSymbol symbol, code constructBlock);
+
+mainFunction args {
+  message "Hello World!";
+}

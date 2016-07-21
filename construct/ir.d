@@ -7,6 +7,7 @@ import std.format : formattedWrite;
 import std.conv   : to;
 import std.typecons : BitFlags;
 
+import construct.patterns : Pattern;
 import construct.processor : ConstructProcessor;
 
 Exception imp(string feature = null, string file = __FILE__, size_t line = __LINE__) {
@@ -186,6 +187,54 @@ PrimitiveTypeEnum commonType(PrimitiveTypeEnum a, PrimitiveTypeEnum b)
   return commonType(a.definition.parentTypeEnum, b);
 }
 
+version(unittest)
+{
+  // helper functions to create construct objects for tests
+  ObjectBreak break_(size_t lineNumber = 1)
+  {
+    __gshared static cached = new ObjectBreak(1);
+    return (lineNumber == 1) ? cached : new ObjectBreak(lineNumber);
+  }
+  ListBreak listBreak(size_t lineNumber = 1)
+  {
+    __gshared static cached = new ListBreak(1);
+    return (lineNumber == 1) ? cached : new ListBreak(lineNumber);
+  }
+  ConstructBlock block(size_t lineNumber, ConstructObject[] objects ...)
+  {
+    return new ConstructBlock(lineNumber, objects);
+  }
+  ConstructList list(size_t lineNumber, ConstructObject[] objects ...)
+  {
+    return new ConstructList(lineNumber, objects);
+  }
+  ConstructSymbol symbol(size_t lineNumber, const(char)[] value)
+  {
+    return new ConstructSymbol(lineNumber, value);
+  }
+  alias prim = PrimitiveTypeEnum;
+  PrimitiveType type(size_t lineNumber, PrimitiveTypeEnum typeEnum)
+  {
+    return new PrimitiveType(lineNumber, typeEnum);
+  }
+  ConstructString string_(string value)
+  {
+    return string_(0, value);
+  }
+  ConstructString string_(size_t lineNumber, string value)
+  {
+    return new ConstructUtf8(lineNumber, value);
+  }
+  ConstructNamedObject named(size_t lineNumber, string name, ConstructObject object)
+  {
+    return new ConstructNamedObject(lineNumber, name, object);
+  }
+  ConstructNull null_(size_t lineNumber)
+  {
+    return new ConstructNull(lineNumber);
+  }
+}
+
 unittest
 {
   // Make sure every type enum has the correct definition in the primitive types table
@@ -229,6 +278,8 @@ interface ISymbolObject
 
   @property inout(ConstructDefinition)  asConstructDefinition() inout;
   @property inout(ConstructType)        asConstructType() inout;
+  @property inout(ConstructReturn)      asConstructReturn() inout;
+  @property inout(ObjectBreak)          asObjectBreak() inout;
   @property inout(ConstructString)      asConstructString() inout;
   @property inout(ConstructUtf8)        asConstructUtf8() inout;
   @property inout(ConstructSymbol)      asConstructSymbol() inout;
@@ -262,6 +313,10 @@ inout(T) as(T)(inout(ISymbolObject) obj)
     return obj.asConstructList;
   } else static if( is ( T == ConstructType ) ) {
     return obj.asConstructType;
+  } else static if( is ( T == ConstructReturn ) ) {
+    return obj.asConstructReturn;
+  } else static if( is ( T == ObjectBreak ) ) {
+    return obj.asObjectBreak;
   } else static if( is ( T == ConstructBool ) ) {
     return obj.asConstructBool;
   } else static if( is ( T == ConstructNumber ) ) {
@@ -270,6 +325,7 @@ inout(T) as(T)(inout(ISymbolObject) obj)
     return obj.asConstructUint;
   } else static assert(0, "the as(ISymbolObject) template does not support type: "~T.staticTypeName);
 }
+
 inout(T) typedMember(T)(inout(ISymbolObject) obj, const(char)[] memberName)
 {
   static if( is ( T == ConstructDefinition ) ) {
@@ -286,6 +342,10 @@ inout(T) typedMember(T)(inout(ISymbolObject) obj, const(char)[] memberName)
     throw imp();
   } else static if( is ( T == ConstructType ) ) {
     throw imp();
+  } else static if( is ( T == ConstructReturn ) ) {
+    throw imp();
+  } else static if( is ( T == ObjectBreak ) ) {
+    throw imp();
   } else static if( is ( T == ConstructBool ) ) {
     throw imp();
   } else static if( is ( T == ConstructNumber ) ) {
@@ -294,6 +354,7 @@ inout(T) typedMember(T)(inout(ISymbolObject) obj, const(char)[] memberName)
     throw imp();
   } else static assert(0, "the as(ISymbolObject) template does not support type: "~T.staticTypeName);
 }
+
 
 // Used to print a string with an 'a <string>' or 'an <string>' prefix depending
 // on if it starts with a vowel.
@@ -347,6 +408,7 @@ struct ProcessResult {
 }
 class ConstructDefinition : ISymbolObject
 {
+  const Pattern pattern;
   const size_t lineNumber;
   @property final size_t getLineNumber() const { return lineNumber; }
 
@@ -360,9 +422,10 @@ class ConstructDefinition : ISymbolObject
   @property
   string typeName() const { return "construct"; }
   
-  this(size_t lineNumber, const(char)[] filename, ConstructAttributes attributes, ConstructType evalTo,
+  this(Pattern pattern, size_t lineNumber, const(char)[] filename, ConstructAttributes attributes, ConstructType evalTo,
        const(ConstructParam)[] requiredParams, const(ConstructOptionalParam)[] optionalParams)
   {
+    this.pattern = pattern;
     this.lineNumber = lineNumber;
     this.filename = filename;
     this.attributes = attributes;
@@ -387,6 +450,8 @@ class ConstructDefinition : ISymbolObject
     return this;
   }
   @property final inout(ConstructType)        asConstructType() inout { return null; }
+  @property final inout(ConstructReturn)      asConstructReturn() inout { return null; }
+  @property final inout(ObjectBreak)       asObjectBreak() inout { return null; }
   @property final inout(ConstructString)      asConstructString() inout { return null; }
   @property final inout(ConstructUtf8)        asConstructUtf8() inout { return null; }
   @property final inout(ConstructSymbol)      asConstructSymbol() inout { return null; }
@@ -435,6 +500,8 @@ class TypeDefinition : ISymbolObject
   {
     return cast(inout(ConstructType))type;
   }
+  @property final inout(ConstructReturn)      asConstructReturn() inout { return null; }
+  @property final inout(ObjectBreak)       asObjectBreak() inout { return null; }
   @property final inout(ConstructString)      asConstructString() inout { return null; }
   @property final inout(ConstructUtf8)        asConstructUtf8() inout { return null; }
   @property final inout(ConstructSymbol)      asConstructSymbol() inout { return null; }
@@ -510,6 +577,8 @@ abstract class ConstructObject : ISymbolObject
 
   @property inout(ConstructDefinition)  asConstructDefinition() inout { return null; }
   @property inout(ConstructType)        asConstructType()       inout { return null; }
+  @property inout(ConstructReturn)      asConstructReturn()     inout { return null; }
+  @property inout(ObjectBreak)       asObjectBreak()      inout { return null; }
   @property inout(ConstructString)      asConstructString()     inout { return null; }
   @property inout(ConstructUtf8)        asConstructUtf8()       inout { return null; }
   @property inout(ConstructSymbol)      asConstructSymbol()     inout { return null; }
@@ -520,6 +589,11 @@ abstract class ConstructObject : ISymbolObject
   @property inout(ConstructList)        asConstructList()       inout { return null; }
   @property inout(ConstructNamedObject) asNamedObject()         inout { return null; }
 
+  const(ConstructObject) typedAs(const(ConstructType) type) const
+  {
+    throw imp(format("typedAs for %s", typeid(this)));
+  }
+  
   static ConstructObject fromUnquoted(size_t lineNumber, const(char)[] unquoted)
   {
     //
@@ -663,6 +737,31 @@ class ConstructTypedListType : ConstructType
     return this.itemType == other.itemType;
   }
 }
+
+class ConstructReturn : ConstructObject
+{
+  const(ConstructObject) returnValue;
+  this(size_t lineNumber, const(ConstructObject) returnValue)
+  {
+    super(lineNumber);
+    this.returnValue = returnValue;
+  }
+  final string typeName() const { return "[return]"; }
+  @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.void_; }
+  @property final override inout(ConstructReturn) asConstructReturn() inout { return this; }
+  override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    sink("[return]");
+  }
+  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const
+  {
+    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
+      return false;
+    }
+    return cast(ConstructReturn)otherObj !is null;
+  }
+}
+
 /*
 class ConstructVoid : ConstructObject
 {
@@ -779,6 +878,7 @@ class ConstructNumber : ConstructObject
 
   
 }
+
 class ConstructUint : ConstructNumber
 {
   size_t value;
@@ -795,6 +895,13 @@ class ConstructUint : ConstructNumber
   }
   @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.uint_; }
   @property final override inout(ConstructUint) asConstructUint() inout { return this; }
+
+  /*
+  const(ConstructObject) typedAs(const(ConstructType) type) const
+  {
+    //if(type
+  }
+  */
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
     formattedWrite(sink, "%s", value);
@@ -1011,6 +1118,7 @@ class ObjectBreak : ConstructObject
     return "[object-break]";
   }
   @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.anything; }
+  @property final override inout(ObjectBreak) asObjectBreak() inout { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink(";");

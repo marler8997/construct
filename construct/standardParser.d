@@ -629,48 +629,6 @@ unittest
     }
   }
 
-  // helper functions
-  ObjectBreak break_(size_t lineNumber = 1)
-  {
-    __gshared static cached = new ObjectBreak(1);
-    return (lineNumber == 1) ? cached : new ObjectBreak(lineNumber);
-  }
-  ListBreak listBreak(size_t lineNumber = 1)
-  {
-    __gshared static cached = new ListBreak(1);
-    return (lineNumber == 1) ? cached : new ListBreak(lineNumber);
-  }
-  ConstructBlock block(size_t lineNumber, ConstructObject[] objects ...)
-  {
-    return new ConstructBlock(lineNumber, objects);
-  }
-  ConstructList list(size_t lineNumber, ConstructObject[] objects ...)
-  {
-    return new ConstructList(lineNumber, objects);
-  }
-  ConstructSymbol symbol(size_t lineNumber, const(char)[] value)
-  {
-    return new ConstructSymbol(lineNumber, value);
-  }
-  alias prim = PrimitiveTypeEnum;
-  PrimitiveType type(size_t lineNumber, PrimitiveTypeEnum typeEnum)
-  {
-    return new PrimitiveType(lineNumber, typeEnum);
-  }
-  ConstructString string_(size_t lineNumber, string value)
-  {
-    return new ConstructString(lineNumber, value);
-  }
-  ConstructNamedObject named(size_t lineNumber, string name, ConstructObject object)
-  {
-    return new ConstructNamedObject(lineNumber, name, object);
-  }
-  ConstructNull null_(size_t lineNumber)
-  {
-    return new ConstructNull(lineNumber);
-  }
-
-  
   test("", []);
   test(";", [break_]);
   test(" ;", [break_]);
