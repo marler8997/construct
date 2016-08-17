@@ -8,10 +8,6 @@ that I'm trying to keep working while developing.
 
 import "util";
 
-
-
-
-
 defcon each(items list, itemSymbol symbol, code constructBlock)
 {
   foreach(item in items) {

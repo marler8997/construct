@@ -11,7 +11,7 @@ ignore
 }
 
 //defcon message (msg string);
-defcon message;
+defcon message(msg string);
 
 // Create a construct that makes sure it gets a failure
 // The addSymbolsToParentScope means that the construct block will

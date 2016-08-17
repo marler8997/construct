@@ -1,0 +1,49 @@
+// -*-mode: c;-*-
+// Enables Syntax Highlighting for github and emacs
+import "util";
+
+//
+// Test Patterns
+//
+{
+  defcon matchAnything(x)
+  {
+    message "matched anything: " x;
+  }
+  matchAnything 1
+  matchAnything "hello"
+  expectFail {
+    matchAnything ;
+  }
+  expectFail {
+    matchAnything aSymbol
+  }
+  matchAnything toSymbol aSymbol
+}
+{
+  defcon oneString(s string)
+  {
+    message s;
+  }
+  oneString "single string pattern"
+}
+{
+  defcon oneSymbol(s symbol)
+  {
+    message "matched symbol: " s;
+  }
+  oneSymbol a
+  oneSymbol abc    
+}
+{
+  /*
+  defcon optionalString(s string optional)
+  {
+    if s {
+      message "optionalString: " s;
+    } else {
+      message "optionalString nostring";
+    }
+  }
+  */
+}

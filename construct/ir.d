@@ -7,10 +7,12 @@ import std.format : formattedWrite;
 import std.conv   : to;
 import std.typecons : BitFlags;
 
-import construct.patterns : Pattern;
+import construct.patterns : Pattern, Matcher;
 import construct.processor : ConstructProcessor;
 
-Exception imp(string feature = null, string file = __FILE__, size_t line = __LINE__) {
+//version = VerboseTests;
+
+Exception imp(string feature = null, string file = __FILE__, size_t line = __LINE__) pure {
   Exception e;
   if(feature) {
     e = new Exception(feature~": not implemented", file, line);
@@ -19,6 +21,21 @@ Exception imp(string feature = null, string file = __FILE__, size_t line = __LIN
   }
   throw e;
   return e;
+}
+struct StringBuilder(size_t MaxSize)
+{
+  char[MaxSize] buffer;
+  size_t offset;
+  void append(const(char)[] s)
+  {
+    assert(offset + s.length <= MaxSize);
+    buffer[offset..offset+s.length] = s;
+    offset += s.length;
+  }
+  string createString()
+  {
+    return buffer[0..offset].idup;
+  }
 }
 
 const(ConstructObject)[] done(Appender!(const(ConstructObject)[]) objects)
@@ -79,6 +96,7 @@ enum PrimitiveTypeEnum {
   constructBlock,
 
   list,
+  constructPattern,
   
   array,
   string,
@@ -102,26 +120,28 @@ struct PrimitiveTypeDefinition
   string name;
   PrimitiveTypeEnum typeEnum;
   PrimitiveTypeEnum parentTypeEnum;
-  this(string name, PrimitiveTypeEnum typeEnum, PrimitiveTypeEnum parentTypeEnum)
+  immutable(Matcher) matcher;
+  this(string name, PrimitiveTypeEnum typeEnum, PrimitiveTypeEnum parentTypeEnum, immutable(Matcher) matcher = null)
   {
     this.name = name;
     this.typeEnum = typeEnum;
     this.parentTypeEnum = parentTypeEnum;
+    this.matcher = matcher;
   }
 }
 immutable PrimitiveTypeDefinition[] primitiveTypes =
   [
    // NOTE: the anything type must have itself as it's parent
-   PrimitiveTypeDefinition("anything" , PrimitiveTypeEnum.anything , PrimitiveTypeEnum.anything),
+   PrimitiveTypeDefinition("anything" , PrimitiveTypeEnum.anything , PrimitiveTypeEnum.anything, Matcher.anything),
    PrimitiveTypeDefinition("named"    , PrimitiveTypeEnum.named    , PrimitiveTypeEnum.anything),
    PrimitiveTypeDefinition("void"     , PrimitiveTypeEnum.void_    , PrimitiveTypeEnum.anything),
    PrimitiveTypeDefinition("nullable" , PrimitiveTypeEnum.nullable , PrimitiveTypeEnum.anything),
 
    PrimitiveTypeDefinition("type"     , PrimitiveTypeEnum.type     , PrimitiveTypeEnum.anything),
 
-   PrimitiveTypeDefinition("symbol"   , PrimitiveTypeEnum.symbol   , PrimitiveTypeEnum.anything),
+   PrimitiveTypeDefinition("symbol"   , PrimitiveTypeEnum.symbol   , PrimitiveTypeEnum.anything, Matcher.symbol),
    
-   PrimitiveTypeDefinition("bool"      , PrimitiveTypeEnum.bool_  , PrimitiveTypeEnum.anything),
+   PrimitiveTypeDefinition("bool"     , PrimitiveTypeEnum.bool_    , PrimitiveTypeEnum.anything, Matcher.bool_),
    
    PrimitiveTypeDefinition("pointer"  , PrimitiveTypeEnum.pointer  , PrimitiveTypeEnum.nullable),
    PrimitiveTypeDefinition("number"   , PrimitiveTypeEnum.number   , PrimitiveTypeEnum.anything),
@@ -135,12 +155,13 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
    PrimitiveTypeDefinition("uni"      , PrimitiveTypeEnum.uni      , PrimitiveTypeEnum.anything),
 
    PrimitiveTypeDefinition("construct"     , PrimitiveTypeEnum.construct     , PrimitiveTypeEnum.nullable),
-   PrimitiveTypeDefinition("constructBlock", PrimitiveTypeEnum.constructBlock, PrimitiveTypeEnum.nullable),
+   PrimitiveTypeDefinition("constructBlock", PrimitiveTypeEnum.constructBlock, PrimitiveTypeEnum.nullable, Matcher.block),
 
-   PrimitiveTypeDefinition("list"     , PrimitiveTypeEnum.list     , PrimitiveTypeEnum.anything),
+   PrimitiveTypeDefinition("list"            , PrimitiveTypeEnum.list            , PrimitiveTypeEnum.anything, Matcher.list),
+   PrimitiveTypeDefinition("constructPattern", PrimitiveTypeEnum.constructPattern, PrimitiveTypeEnum.list),
 
    PrimitiveTypeDefinition("array"    , PrimitiveTypeEnum.array    , PrimitiveTypeEnum.nullable),
-   PrimitiveTypeDefinition("string"   , PrimitiveTypeEnum.string   , PrimitiveTypeEnum.array),
+   PrimitiveTypeDefinition("string"   , PrimitiveTypeEnum.string   , PrimitiveTypeEnum.array, Matcher.string_),
    PrimitiveTypeDefinition("ascii"    , PrimitiveTypeEnum.ascii    , PrimitiveTypeEnum.string),
    PrimitiveTypeDefinition("unicode"  , PrimitiveTypeEnum.unicode  , PrimitiveTypeEnum.string),
    PrimitiveTypeDefinition("utf8"     , PrimitiveTypeEnum.utf8     , PrimitiveTypeEnum.unicode),
@@ -156,7 +177,7 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
    PrimitiveTypeDefinition("limitUtf8"   , PrimitiveTypeEnum.limitUtf8     , PrimitiveTypeEnum.limitUnicode),
    ];
 
-PrimitiveTypeDefinition definition(PrimitiveTypeEnum typeEnum)
+PrimitiveTypeDefinition definition(PrimitiveTypeEnum typeEnum) pure
 {
   return primitiveTypes[cast(uint)typeEnum];
 }
@@ -240,8 +261,10 @@ unittest
   // Make sure every type enum has the correct definition in the primitive types table
   // And that every type inherits from the 'anything' type.
   foreach(primitiveTypeEnum; __traits(allMembers, PrimitiveTypeEnum)) {
-    writefln("Checking primitive type '%s'", primitiveTypeEnum);
-    stdout.flush();
+    version(VerboseTests) {
+      writefln("Checking primitive type '%s'", primitiveTypeEnum);
+      stdout.flush();
+    }
     auto index = cast(uint)mixin("PrimitiveTypeEnum."~primitiveTypeEnum);
     if(index >= primitiveTypes.length) {
       throw new Exception("The primitiveTypes table is missing values.");
@@ -301,6 +324,38 @@ inout(T) as(T)(inout(ISymbolObject) obj)
 {
   static if( is ( T == ConstructDefinition ) ) {
     return obj.asConstructDefinition;
+  } else static if( is ( T == ConstructObject ) ) {
+    throw imp();
+  } else static if( is ( T == ConstructString ) ) {
+    return obj.asConstructString;
+  } else static if( is ( T == ConstructUtf8 ) ) {
+    return obj.asConstructUtf8;
+  } else static if( is ( T == ConstructSymbol ) ) {
+    return obj.asConstructSymbol;
+  } else static if( is ( T == ConstructBlock ) ) {
+    return obj.asConstructBlock;
+  } else static if( is ( T == ConstructList ) ) {
+    return obj.asConstructList;
+  } else static if( is ( T == ConstructType ) ) {
+    return obj.asConstructType;
+  } else static if( is ( T == ConstructReturn ) ) {
+    return obj.asConstructReturn;
+  } else static if( is ( T == ObjectBreak ) ) {
+    return obj.asObjectBreak;
+  } else static if( is ( T == ConstructBool ) ) {
+    return obj.asConstructBool;
+  } else static if( is ( T == ConstructNumber ) ) {
+    return obj.asConstructNumber;
+  } else static if( is ( T == ConstructUint ) ) {
+    return obj.asConstructUint;
+  } else static assert(0, "the as(ISymbolObject) template does not support type: "~T.staticTypeName);
+}
+inout(T) as(T)(inout(ConstructObject) obj)
+{
+  static if( is ( T == ConstructDefinition ) ) {
+    return obj.asConstructDefinition;
+  } else static if( is ( T == ConstructObject ) ) {
+    return obj;
   } else static if( is ( T == ConstructString ) ) {
     return obj.asConstructString;
   } else static if( is ( T == ConstructUtf8 ) ) {
@@ -406,15 +461,23 @@ struct ProcessResult {
   size_t nextIndex;
   const(ConstructObject) object;
 }
+alias ConstructHandler = const(ConstructObject) function(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol, const(ConstructObject)[] args);
+
+struct PatternHandler
+{
+  Pattern pattern;
+  ConstructHandler handler;
+}
+
 class ConstructDefinition : ISymbolObject
 {
-  const Pattern pattern;
+  const(PatternHandler)[] patternHandlers;
   const size_t lineNumber;
   @property final size_t getLineNumber() const { return lineNumber; }
 
   const(char)[] filename;
-  ConstructAttributes attributes;
-  ConstructType evalTo;
+  const ConstructAttributes attributes;
+  const ConstructType evalTo;
   const(ConstructParam)[] requiredParams;
   const(ConstructOptionalParam)[] optionalParams;
 
@@ -422,16 +485,23 @@ class ConstructDefinition : ISymbolObject
   @property
   string typeName() const { return "construct"; }
   
-  this(Pattern pattern, size_t lineNumber, const(char)[] filename, ConstructAttributes attributes, ConstructType evalTo,
+  this(size_t lineNumber, const(char)[] filename, ConstructAttributes attributes, ConstructType evalTo,
        const(ConstructParam)[] requiredParams, const(ConstructOptionalParam)[] optionalParams)
   {
-    this.pattern = pattern;
     this.lineNumber = lineNumber;
     this.filename = filename;
     this.attributes = attributes;
     this.evalTo = evalTo;
     this.requiredParams = requiredParams;
     this.optionalParams = optionalParams;
+  }
+  this(immutable(PatternHandler)[] patternHandlers, ConstructAttributes attributes, immutable ConstructType evalTo, string filename) immutable
+  {
+    this.patternHandlers = patternHandlers;
+    this.lineNumber = 0;
+    this.filename = filename;
+    this.attributes = attributes;
+    this.evalTo = evalTo;
   }
 
   @property final inout(ConstructObject) asOneConstructObject() inout
@@ -446,7 +516,7 @@ class ConstructDefinition : ISymbolObject
 
   @property
   final inout(ConstructDefinition) asConstructDefinition() inout
-  {
+   {
     return this;
   }
   @property final inout(ConstructType)        asConstructType() inout { return null; }
@@ -466,8 +536,35 @@ class ConstructDefinition : ISymbolObject
   {
     throw imp("ConstructDefinition equals");
   }
-  abstract const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                          const(ConstructObject)[] objects, size_t* argIndex) const;
+  abstract const(ConstructObject) processNoPattern(ConstructProcessor* processor,
+      const(ConstructSymbol) constructSymbol, const(ConstructObject)[] objects, size_t* argIndex) const;
+
+  //  abstract const(ConstructObject) process2(ConstructProcessor* processor,
+  //      const(ConstructSymbol) constructSymbol, const(ConstructObject)[] args) const;
+  const(ConstructObject) process2(ConstructProcessor* processor,
+      const(ConstructSymbol) constructSymbol, const(ConstructObject)[] args) const
+  {
+    throw imp(format("construct '%s', process2", constructSymbol.value));
+  }
+}
+
+class InternalImplementedConstruct : ConstructDefinition
+{
+  this(immutable(PatternHandler)[] patternHandlers, ConstructAttributes attributes,
+       immutable ConstructType evalTo, string filename = __FILE__) immutable
+  {
+    super(patternHandlers, attributes, evalTo, filename);
+  }
+  override const(ConstructObject) processNoPattern(ConstructProcessor* processor,
+      const(ConstructSymbol) constructSymbol, const(ConstructObject)[] objects, size_t* argIndex) const
+  {
+    throw new Exception("processNoPattern is deprecated");
+  }
+  override const(ConstructObject) process2(ConstructProcessor* processor,
+      const(ConstructSymbol) constructSymbol, const(ConstructObject)[] args) const
+  {
+    throw new Exception("process2 is deprecated");
+  }
 }
 class TypeDefinition : ISymbolObject
 {
@@ -529,6 +626,10 @@ abstract class ConstructObject : ISymbolObject
   @property final size_t getLineNumber() const { return lineNumber; }
 
   this(size_t lineNumber)
+  {
+    this.lineNumber = lineNumber;
+  }
+  this(size_t lineNumber) immutable
   {
     this.lineNumber = lineNumber;
   }
@@ -630,14 +731,18 @@ abstract class ConstructType : ConstructObject
   {
     super(lineNumber);
   }
+  this(size_t lineNumber) immutable
+  {
+    super(lineNumber);
+  }
   enum staticTypeName = "type";
   enum primitiveTypeEnum = PrimitiveTypeEnum.type;
   @property final override PrimitiveTypeEnum primitiveType() const { return primitiveTypeEnum; }
 
   @property abstract PrimitiveTypeEnum asPrimitive() const;
   @property final override inout(ConstructType) asConstructType() inout { return this; }
-  
-  //@property bool isVoid() { return false; }
+
+  @property abstract immutable(Matcher) matcher() const;
 }
 
 PrimitiveType create(PrimitiveTypeEnum typeEnum, size_t lineNumber)
@@ -652,9 +757,14 @@ class PrimitiveType : ConstructType
     super(lineNumber);
     this.typeEnum = typeEnum;
   }
+  this(size_t lineNumber, PrimitiveTypeEnum typeEnum) immutable
+  {
+    super(lineNumber);
+    this.typeEnum = typeEnum;
+  }
   final string typeName() const
   {
-    return to!string(typeEnum);
+    return "primitiveType";
   }
   @property final override PrimitiveTypeEnum asPrimitive() const { return typeEnum; }
   override void toString(scope void delegate(const(char)[]) sink) const
@@ -668,6 +778,13 @@ class PrimitiveType : ConstructType
     }
     auto other = cast(PrimitiveType)otherObj;
     return other && this.typeEnum == other.typeEnum;
+  }
+  @property override immutable(Matcher) matcher() const
+  {
+    if(!typeEnum.definition.matcher) {
+      throw imp(format("matcher for '%s' not configured in primitive type definition", typeName));
+    }
+    return typeEnum.definition.matcher;
   }
   /*
   final override bool isVoid()
@@ -704,6 +821,10 @@ class ConstructReferenceType : ConstructType
   {
     return this.constructName == other.constructName;
   }
+  @property override immutable(Matcher) matcher() const
+  {
+    throw imp("ConstructReferencdType.matcher");
+  }
   // TODO: create an abstract method that returns the default value
 }
 class ConstructTypedListType : ConstructType
@@ -736,6 +857,10 @@ class ConstructTypedListType : ConstructType
     }
     return this.itemType == other.itemType;
   }
+  @property override immutable(Matcher) matcher() const
+  {
+    throw imp("ConstructTypedList.matcher");
+  }
 }
 
 class ConstructReturn : ConstructObject
@@ -759,6 +884,30 @@ class ConstructReturn : ConstructObject
       return false;
     }
     return cast(ConstructReturn)otherObj !is null;
+  }
+}
+
+class ConstructPattern : ConstructObject
+{
+  const(Pattern) pattern;
+  this(size_t lineNumber, const(Pattern) pattern)
+  {
+    super(lineNumber);
+    this.pattern = pattern;
+  }
+  final string typeName() const { return "pattern"; }
+  @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.constructPattern; }
+  override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    sink("<pattern.toString not implemented>");
+  }
+  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const
+  {
+    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
+      return false;
+    }
+    throw imp("ConstructPattern.equals");
+    //return cast(ConstructReturn)otherObj !is null;
   }
 }
 
@@ -848,6 +997,8 @@ class ConstructBool : ConstructObject
   enum primitiveTypeEnum = PrimitiveTypeEnum.bool_;
   enum staticTypeName = "bool";
   final string typeName() const { return staticTypeName; }
+  enum processorValueType = "ConstructBool";
+  enum processorOptionalValueType = "ConstructBool";
   @property final override PrimitiveTypeEnum primitiveType() const { return primitiveTypeEnum; }
   
   @property final override inout(ConstructBool) asConstructBool() inout { return this; }
@@ -934,6 +1085,8 @@ class ConstructString : ConstructObject
   enum primitiveTypeEnum = PrimitiveTypeEnum.string;
   enum staticTypeName = "string";
   @property final override inout(ConstructString) asConstructString() inout { return this; }
+  enum processorValueType = "ConstructString";
+  enum processorOptionalValueType = "ConstructString";
 
   abstract const(char)[] toUtf8() const;
   abstract size_t stringByteLength(PrimitiveTypeEnum type);
@@ -1033,6 +1186,7 @@ class ConstructSymbol : ConstructObject
   {
     return "symbol";
   }
+  enum processorValueType = "ConstructSymbol";
   @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.symbol; }
   @property final override inout(ConstructSymbol) asConstructSymbol() inout { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const
@@ -1117,6 +1271,8 @@ class ObjectBreak : ConstructObject
   {
     return "[object-break]";
   }
+  enum processorValueType = null;
+  enum processorOptionalValueType = "ObjectBreak";
   @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.anything; }
   @property final override inout(ObjectBreak) asObjectBreak() inout { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const
@@ -1191,6 +1347,9 @@ class ConstructList : ConstructObject
   {
     return "list";
   }
+  enum processorValueType = "ConstructList";
+  enum processorOptionalValueType = "ConstructList";
+
   @property final override PrimitiveTypeEnum primitiveType() const { return PrimitiveTypeEnum.list; }
   @property final override inout(ConstructList) asConstructList() inout { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const
@@ -1239,6 +1398,8 @@ class ConstructBlock : ConstructObject
   }
   enum primitiveTypeEnum = PrimitiveTypeEnum.constructBlock;
   enum staticTypeName = "constructBlock";
+  enum processorValueType = "ConstructBlock";
+  enum processorOptionalValueType = "ConstructBlock";
   final string typeName() const
   {
     return "constructBlock";

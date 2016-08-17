@@ -6,13 +6,16 @@ object ::= symbol | number | string | block | list | ';'
 named-object ::= (symbol | number | string) '=' object
 block ::= '{' construct '}'
 list ::= '(' (construct | ',')* ')'
+string ::= '"' chars '"'
+symbolString ::= "'" symbol
 */
 
 module construct.standardParser;
 
 import std.stdio  : writeln, writefln, stdout;
 import std.array  : appender, Appender;
-import std.file   : read, exists, mkdir, baseName, dirName, buildNormalizedPath;
+import std.file   : read, exists, mkdir;
+import std.path   : baseName, dirName, buildNormalizedPath;
 import std.string : format;
 import std.format : formattedWrite;
 import std.conv   : to;
@@ -20,6 +23,8 @@ import std.conv   : to;
 import utf8;
 import construct.ir;
 import construct.parser : ConstructParseException;
+
+//version = VerboseTests;
 
 // A wrapper that will print any character in a human readable format
 // only using ascii characters
@@ -286,6 +291,24 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
 	continue;
       }
 
+      // Symbol Strings
+      if(c == '\'') {
+	auto stringLineNumber = state.lineNumber;
+	if(state.next >= limit) {
+	  throw new ConstructCFamilyParseException
+	    (ErrorType.endedEarly, state.lineNumber, "expected symbol after ' but reached end of input");
+	}
+	readChar();
+	if(!isFirstCharacterOfSymbol(state.c)) {
+	  throw new ConstructCFamilyParseException
+	    (ErrorType.invalidChar, state.lineNumber, format("expected symbol character after ' but got '%s'", AsciiPrint(state.c)));
+	}
+	auto symbol = parseSymbol();
+	objects.put(new ConstructUtf8(stringLineNumber, symbol));
+	state.next = state.cpos; // rewind
+	continue;
+      }
+      
       // Numbers
       if(c >= '0' && c <= '9') {
         auto numberLineNumber = state.lineNumber;
@@ -588,9 +611,11 @@ unittest
 {
   void test(const(char)[] code, ConstructObject[] expected = null, size_t testLine = __LINE__)
   {
-    writeln("---------------------------------------");
-    writefln("[TEST] \"%s\"", AsciiPrintString(code));
-    stdout.flush();
+    version(VerboseTests) {
+      writeln("---------------------------------------");
+      writefln("[TEST] \"%s\"", AsciiPrintString(code));
+      stdout.flush();
+    }
     auto codeTree = parse!(Appender!(const(ConstructObject)[]))(code);
     if(expected) {
       if(codeTree.length != expected.length) {
@@ -612,9 +637,11 @@ unittest
 
   void testError(ErrorType expectedError, const(char)[] code, size_t testLine = __LINE__)
   {
-    writeln("---------------------------------------");
-    writefln("[TEST-ERROR] (%s) \"%s\"", expectedError, AsciiPrintString(code));
-    stdout.flush();
+    version(VerboseTests) {
+      writeln("---------------------------------------");
+      writefln("[TEST-ERROR] (%s) \"%s\"", expectedError, AsciiPrintString(code));
+      stdout.flush();
+    }
     try {
       auto codeTree = parse!(Appender!(const(ConstructObject)[]))(code);
       assert(0, format("Expected exception '%s' but did not get one. (testline %s) Code=\"%s\"",
@@ -625,7 +652,9 @@ unittest
 	stdout.flush();
 	assert(0, format("Expected error '%s' but got '%s' (testline %s)", expectedError, e.type, testLine));
       }
-      writefln("[TEST-ERROR] Successfully got error: %s", e.msg);
+      version(VerboseTests) {
+	writefln("[TEST-ERROR] Successfully got error: %s", e.msg);
+      }
     }
   }
 
@@ -665,7 +694,7 @@ unittest
 
   for(uint i = 0; i < 128; i++) {
     if(!isFirstCharacterOfSymbol(i) &&
-       i != ' ' && i != '\t' && i != '\r' && i != '\n' &&
+       i != ' ' && i != '\t' && i != '\r' && i != '\n' && i != '\'' &&
        i != '/' && i != '(' && i != '{' && i != ';' && i != '"' &&
        !(i >= '0' && i <= '9')) {
       char c = cast(char)i;
@@ -738,6 +767,26 @@ unittest
   testError(ErrorType.endedEarly, "a \" ");
   test("a \"a string!\";", [symbol(1, "a"), string_(1, "a string!"), break_]);
 
+  // Symbol Strings
+  testError(ErrorType.endedEarly, "'");
+  {
+    char[2] str;
+    str[0] = '\'';
+    foreach(i; 0..128) {
+      if(!isFirstCharacterOfSymbol(i)) {
+	str[1] = cast(char)i;
+	testError(ErrorType.invalidChar, str);
+      }
+    }
+  }
+  test("'a", [string_(1, "a")]);
+  test("'abc", [string_(1, "abc")]);
+  test("'a ", [string_(1, "a")]);
+  test("'abc ", [string_(1, "abc")]);
+  test("'a //", [string_(1, "a")]);
+  test("'a /**/", [string_(1, "a")]);
+  test("'abc /**/", [string_(1, "abc")]);
+  
   // List Breaks
   test("a (c,d,e);", [symbol(1, "a"), list(1, symbol(1, "c"), listBreak,
                                            symbol(1, "d"), listBreak,

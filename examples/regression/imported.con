@@ -2,7 +2,7 @@
 // Enables Syntax Highlighting for github and emacs
 import "util";
 
-defcon aConstructDefinedInDevImport
+defcon aConstructDefinedInDevImport()
 {
   message "Called a construct defined in another file";
 }

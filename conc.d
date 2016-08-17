@@ -4,8 +4,8 @@
 import std.stdio  : writeln, writefln, stdout, File;
 import std.getopt : getopt;
 import std.array  : appender, Appender;
-import std.file   : read, exists, mkdir, baseName, dirName, buildNormalizedPath;
-import std.path   : setExtension;
+import std.file   : read, exists, mkdir;
+import std.path   : setExtension, baseName, dirName, buildNormalizedPath;
 import std.string : format;
 import std.format : formattedWrite;
 

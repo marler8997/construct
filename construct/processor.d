@@ -1,33 +1,15 @@
 module construct.processor;
-/*
-The Process Loop
---------------------
 
-while(true) {
-  if(index >= objects.length) {
-    return null;
-  }
-  object = objects[index++];
-
-  if(object.type == symbol) {
-    object = object.resolveSymbol;
-    if(object is construct) {
-      processConstruct()
-      continue;
-    }
-  }
-
-}
- */
-import std.file   : exists, buildNormalizedPath, read;
-import std.path   : setExtension, stripExtension;
+import std.file   : exists, read;
+import std.path   : setExtension, stripExtension, buildNormalizedPath;
 import std.array  : Appender, appender, isDynamicArray, ElementEncodingType;
 import std.string : startsWith, format, indexOf;
 import std.conv   : to;
+import std.format : formattedWrite;
 
 import core.stdc.stdlib : malloc, free;
 
-import construct.patterns : Pattern, undefinedPattern;
+import construct.patterns;
 import construct.ir;
 import construct.parser : SourceFile, ConstructParser, standardParser, ConstructParseException;
 
@@ -150,28 +132,28 @@ struct OneOrMore(T)
   }
 
   @property
-  Range each()
+  Range each() const
   {
     return Range(this, 0);
   }
   struct Range
   {
-    OneOrMore oneOrMore;
+    const OneOrMore oneOrMore;
     size_t state;
-    this(OneOrMore oneOrMore, size_t state)
+    this(const OneOrMore oneOrMore, size_t state)
     {
       this.oneOrMore = oneOrMore;
       this.state = state;
     }
     @property
-    bool empty() {
+    bool empty() const {
       //writefln("state is %s, empty is %s", state, state > oneOrMore.moreCount);
       return state > oneOrMore.moreCount;
     }
     @property
-    T front()
+    T front() const
     {
-      return (state == 0) ? oneOrMore.first : oneOrMore.buffer[state-1];
+      return (state == 0) ? cast(T)oneOrMore.first : cast(T)oneOrMore.buffer[state-1];
     }
     void popFront()
     {
@@ -235,18 +217,19 @@ struct ConstructProcessor
     // TODO: implement 'letset' which adds a symbol if it does not exist, or updates
     //       it if it does exist
     currentScope.symbols = 
-      ["import"     : SymbolEntryList(singleton!ImportConstructDefinition()),
-       "defcon"     : SymbolEntryList(singleton!DefconConstructDefinition()),
+      ["import"     : SymbolEntryList(importConstructDefinition.unconst),
+       "defcon"     : SymbolEntryList(defconConstructDefinition.unconst), // TODO: support without unconst
        "deftype"    : SymbolEntryList(singleton!DeftypeConstructDefinition()),
-       "toSymbolRef": SymbolEntryList(singleton!ToSymbolRefConstructDefinition()),
+       "pattern"    : SymbolEntryList(patternConstructDefinition.unconst),
+       "toSymbol"   : SymbolEntryList(toSymbolConstructDefinition.unconst),
        //"callerScope": SymbolEntryList(singleton!CallerScopeConstructDefinition()),
        "addSymbolsToCaller": SymbolEntryList(singleton!AddSymbolsToCallerConstructDefinition()),
        "exec"       : SymbolEntryList(singleton!ExecConstructDefinition()),
        "throw"      : SymbolEntryList(singleton!ThrowConstructDefinition()),
        "try"        : SymbolEntryList(singleton!TryConstructDefinition()),
-       "let"        : SymbolEntryList(singleton!LetConstructDefinition()),
-       "set"        : SymbolEntryList(singleton!SetConstructDefinition()),
-       "letset"     : SymbolEntryList(singleton!LetSetConstructDefinition()),
+       "let"        : SymbolEntryList(letConstructDefinition.unconst),
+       "set"        : SymbolEntryList(setConstructDefinition.unconst),
+       "letset"     : SymbolEntryList(letSetConstructDefinition.unconst),
        "if"         : SymbolEntryList(singleton!IfConstructDefinition()),
        "equals"     : SymbolEntryList(singleton!EqualsConstructDefinition()),
        "listOf"     : SymbolEntryList(singleton!ListOfConstructDefinition()),
@@ -467,14 +450,14 @@ struct ConstructProcessor
   }
 
   
-  SymbolEntryList tryLookupSymbol(const(char)[] fullSymbol)
+  const(SymbolEntryList) tryLookupSymbol(const(char)[] fullSymbol) const
   {
     const(char)[] rest;
     auto symbol = fullSymbol.splitAtDot(&rest);
     
     // Search current scope
     {
-      SymbolEntryList match = currentScope.symbols.get(symbol, SymbolEntryList(null));
+      auto match = currentScope.symbols.get(symbol, SymbolEntryList(null));
       if(match.first) {
         if(rest.length == 0) {
           return match;
@@ -637,34 +620,193 @@ struct ConstructProcessor
 
   const(ConstructSymbol) consumeSymbol(const(ConstructSymbol) context, const(ConstructObject)[] objects, size_t* index)
   {
-    if(*index >= objects.length) {
-      throw endedInsideConstruct(context);
-    }
-    auto object = objects[*index];
-    (*index)++;
-    if(auto symbol = object.asConstructSymbol) {
-      if(symbol.value == "resolveSymbolRef") {
-        if(*index >= objects.length) {
-          throw endedInsideConstruct(context);
-        }
-        auto symbolRefObject = objects[*index];
-        (*index)++;
-        auto symbolRefSymbol = symbolRefObject.asConstructSymbol;
-        if(!symbolRefSymbol) {
-          throw semanticError(context.lineNumber, format
-                              ("resolveSymbolRef requires a symbol ref but got %s", An(symbolRefObject.typeName)));
-        }
-
-        //logDev("going to lookup '%s'", symbolRefSymbol.value);
-        return lookupSymbol!ConstructSymbol(symbolRefSymbol);
-      }
-      return symbol;
-    } else {
+    auto symbol = tryConsumeSymbol(context, objects, index);
+    if(!symbol) {
       throw semanticError(context.lineNumber, format
-                          ("construct %s expected a symbol but got %s", context.value, An(object.typeName)));
+                          ("construct '%s' expected a symbol", context.value));
     }
+    return symbol;
+  }
+  const(ConstructSymbol) tryConsumeSymbol(const(ConstructSymbol) context, const(ConstructObject)[] objects, size_t* index)
+  {
+    size_t nextIndex = *index;
+    if(nextIndex >= objects.length) {
+      //throw endedInsideConstruct(context);
+      return null;
+    }
+    auto object = objects[nextIndex++];
+    auto symbol = object.asConstructSymbol;
+    if(!symbol) {
+      //throw semanticError(context.lineNumber, format
+      //("construct '%s' expected a symbol but got %s", context.value, An(object.typeName)));
+      return null;
+    }
+    
+    if(symbol.value != "sym") {
+      *index = nextIndex;
+      return symbol;
+    }
+
+    if(nextIndex >= objects.length) {
+      //return null;
+      throw semanticError(symbol.lineNumber, "no objects followed the 'sym' keyword");
+    }
+    
+    auto result = consumeValueAlreadyCheckedIndex(objects, &nextIndex).unconst;
+    if(!result) {
+      throw semanticError(symbol.lineNumber, "The 'sym' keyword expects an expression that evaluates to a symbol or string but evaulated to null");
+    }
+    if(auto resolvedSymbol = result.asConstructSymbol) {
+      *index = nextIndex;
+      return resolvedSymbol;
+    }
+    if(auto resolvedString = result.asConstructString) {
+      *index = nextIndex;
+      return new ConstructSymbol(resolvedString.lineNumber, resolvedString.toUtf8());
+    }
+    throw semanticError(symbol.lineNumber, format("The 'sym' keyword expects an expression that evaluates to a symbol or string but evaulated to %s", result.typeName));
   }
 
+  /*
+  inout(PatternNode) nextRequired(inout(PatternNode)[] nodes)
+  {
+    foreach(node; nodes) {
+      if(!node.countType.isOptional) {
+	return node;
+      }
+    }
+    return PatternNode.null_;
+  }
+  */
+
+  bool matchPattern(const(ConstructSymbol) constructSymbol, Pattern pattern,
+                    const(ConstructObject)[] objects, size_t* index,
+                    void delegate(const(ConstructObject) arg) appendArg)
+  {
+    
+  PATTERN_NODE_LOOP:
+    foreach(nodeIndex,node; pattern.nodes) {
+      //logDev("  matching pattern node %d '%s' of type '%s'", nodeIndex, node.name, node);
+      if(*index >= objects.length) {
+
+        if(!node.countType.isOptional) {
+          //logDev("  did not match");
+          return false; // not a match
+          /*
+          throw semanticError(constructSymbol.lineNumber, format("construct '%s' did not get enough objects, expected at least one '%s' next", constructSymbol.value, node.matcher.codeText));
+          */
+        }
+        if(node.matcher.processorOptionalValueType && node.name) {
+          appendArg(null);
+        }
+        continue;
+      }
+
+      // Detect the symbol case
+      if(node.matcher.matchesAnySymbolNext) {
+
+        if(!cast(SymbolMatcher)node.matcher) {
+          throw imp();
+        }
+        if(node.countType != CountType.one) {
+          throw imp(format("  matching symbol with count type %s", node.countType));
+        }
+        auto symbol = tryConsumeSymbol(constructSymbol, objects, index);
+        if(symbol is null) {
+          return false; // not a match
+        }
+        if(node.name) {
+          appendArg(symbol);
+        }
+        continue;
+      }
+
+      //logDev("  consuming value...");
+      auto value = consumeValueAlreadyCheckedIndex(objects, index);
+      if(value is null) {
+        throw imp("value is null");
+      }
+      // todo: handle returns
+	
+      if(!node.matcher.match(value)) {
+        if(!node.countType.isOptional) {
+          //logDev("  did not match");
+          return false; // not a match
+          //throw semanticError(constructSymbol.lineNumber, format("construct '%s' expected %s but got %s", constructSymbol.value, An(node.matcher.codeText), An(value.typeName)));
+        }
+        if(node.name) {
+          appendArg(null);
+        }
+        continue PATTERN_NODE_LOOP;
+      }
+      //logDev("    matcher '%s' matched '%s'", node.matcher.codeText, value);
+        
+      if(node.countType == CountType.one) {
+        if(node.name) {
+          appendArg(value);
+        }
+        continue PATTERN_NODE_LOOP;
+      }
+      if(node.countType == CountType.optional) {
+        if(node.matcher.processorOptionalValueType && node.name) {
+          appendArg(value);
+        }
+        continue PATTERN_NODE_LOOP;
+      }
+      imp(format("count type %s", node.countType));
+    }
+    return true; // match
+  }
+
+  
+  const(ConstructObject) processConstruct(ConstructSymbol constructSymbol,
+      const(ConstructDefinition) con, const(ConstructObject)[] objects, size_t* index)
+  {
+    if(con.patternHandlers.length == 0) {
+      return con.processNoPattern(&this, constructSymbol, objects, index);
+    }
+
+    ConstructObject[256] constructArgs;
+    size_t constructArgCount = 0;
+    ConstructObject[256] constructObjectBuffer;
+    size_t constructObjectOffset = 0;
+
+    void appendArg(const(ConstructObject) arg)
+    {
+      constructArgs[constructArgCount++] = arg.unconst;
+    }
+
+    ConstructHandler handler = null;
+    foreach(patternHandlerIndex, patternHandler; con.patternHandlers) {
+      size_t nextIndex;
+      nextIndex = *index;
+      constructArgCount = 0;
+      //logDev("Attempting to match pattern %d for construct '%s'...", patternHandlerIndex, constructSymbol.value);
+      if(matchPattern(constructSymbol, patternHandler.pattern, objects, &nextIndex, &appendArg)) {
+        handler = patternHandler.handler;
+        *index = nextIndex;
+        break;
+      }
+    }
+
+    if(handler == null) {
+      throw semanticError(constructSymbol.lineNumber, format("construct '%s' had no pattern that matched the following contruct objects", constructSymbol.value));
+    }
+    
+    //
+    // Print the arguments
+    //
+    /*
+    logDev("Setup %d argument(s):", constructArgCount);
+    foreach(i, arg; constructArgs[0..constructArgCount]) {
+      logDev("  [%s] %s (%s)", i, arg, arg.typeName);
+    }
+    */
+    
+    return handler(&this, constructSymbol, constructArgs[0..constructArgCount]);
+  }
+
+  
 
   //
   // Object consumeValue(Object[] objects, ref index)
@@ -696,7 +838,7 @@ struct ConstructProcessor
   const(ConstructObject) consumeValueAlreadyCheckedIndex(const(ConstructObject)[] objects, size_t* index)
   {
     assert(*index < objects.length);
-    
+
     auto object = objects[*index];
     (*index)++;
     if(auto symbol = object.asConstructSymbol.unconst) {
@@ -712,8 +854,7 @@ struct ConstructProcessor
         }
 
         if(auto definition = symbolEntries.first.asConstructDefinition) {
-          logDebug("processing '%s' construct", symbol.value);
-          return definition.process(&this, symbol, objects, index);
+	  return processConstruct(symbol, definition, objects, index);
         }
 
         return symbolEntries.first.asOneConstructObject;
@@ -827,17 +968,17 @@ alias ProcessorFunc = const(ConstructObject) function(ConstructProcessor* proces
 class FunctionConstructDefinition : ConstructDefinition
 {
   ProcessorFunc func;
-  this(const Pattern pattern, size_t lineNumber, const(char)[] filename,
+  this(size_t lineNumber, const(char)[] filename,
        ConstructAttributes attributes, ConstructType evalTo,
        const(ConstructParam)[] requiredParams,
        const(ConstructOptionalParam)[] optionalParams, ProcessorFunc func)
   {
-    super(pattern, lineNumber, filename, attributes,
+    super(lineNumber, filename, attributes,
 	  evalTo, requiredParams, optionalParams);
     this.func = func;
   }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+						   const(ConstructObject)[] objects, size_t* argIndex) const
   {
     return func(processor, this, constructSymbol, objects, argIndex);
   }
@@ -850,15 +991,17 @@ class ConstructWithBlockDefinition : ConstructDefinition
        ConstructType evalTo, const(ConstructParam)[] requiredParams,
        const(ConstructOptionalParam)[] optionalParams, const(ConstructBlock) block)
   {
-    super(pattern, lineNumber, filename, attributes,
+    super(lineNumber, filename, attributes,
 	  evalTo, requiredParams, optionalParams);
     this.block = block;
   }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+						   const(ConstructObject)[] objects, size_t* argIndex) const
   {
-    logDebug("entering scope for construct '%s' defined on line %s (%s required args)",
-             constructSymbol.value, lineNumber, requiredParams.length);
+    //throw new Exception("ConstructWithBlockDefinition.processNoPattern deprecated");
+
+    logDebug("entering scope for construct '%s' defined on line %s",
+             constructSymbol.value, lineNumber);
     processor.pushScope(lineNumber, ScopeType.defcon,
                         cast(bool)(attributes & ConstructAttribute.openScope));
     scope(exit) {processor.popScope();}
@@ -901,17 +1044,118 @@ class ConstructWithBlockDefinition : ConstructDefinition
       }
     }
     return processor.processConstructImplementationBlock(block.objects, this);
+
   }
+
 }
 
+
+
+
+
+struct FuncAndPattern {
+  string funcName;
+  Pattern pattern;
+
+  string genFunc() const pure
+  {
+    //writefln("argNames = %s", argNames);
+
+    StringBuilder!512 builder;
+
+    builder.append("const(ConstructObject) ");
+    builder.append(funcName);
+    builder.append("(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol");
+  
+    foreach(node; pattern.nodes) {
+      string typeName = null;
+      if(node.countType == CountType.optional) {
+	typeName = node.matcher.processorOptionalValueType;
+      } else {
+	typeName = node.matcher.processorValueType;
+      }
+    
+      if(typeName) {
+	builder.append(", const(");
+	builder.append(typeName);
+	if(!node.countType.onlyOne) {
+	  builder.append(")[] ");
+	} else {
+	  builder.append(") ");
+	}
+        builder.append(node.name);
+      }
+    }
+    builder.append(")");
+    return builder.createString();
+  }
+}
+string genConstructPatternThunk(string name, const FuncAndPattern patternFunc) pure
+{
+  StringBuilder!1024 builder;
+
+  builder.append("const(ConstructObject) ");
+  builder.append(name);
+  builder.append("(ConstructProcessor* processor");
+  builder.append(", const(ConstructSymbol) constructSymbol");
+  builder.append(", const(ConstructObject)[] args)\n");
+  builder.append("{\n");
+  
+  builder.append("  assert(args.length == ");
+  auto assertCountOffset = builder.offset;
+  builder.append("            );\n");
+
+  builder.append("  return ");
+  builder.append(patternFunc.funcName);
+  builder.append("(processor, constructSymbol");
+  
+  size_t argIndex = 0;
+  foreach(node; patternFunc.pattern.nodes) {
+    string typeName = null;
+    if(node.countType == CountType.optional) {
+      typeName = node.matcher.processorOptionalValueType;
+    } else {
+      typeName = node.matcher.processorValueType;
+    }
+
+    if(typeName) {
+      formattedWrite(&builder.append, ",\n    args[%s] ? args[%s].as!%s : null", argIndex, argIndex, typeName);
+      argIndex++;
+    }
+  }
+
+  builder.append(");\n");
+  builder.append("}\n");
+  auto codeSize = builder.offset;
+  builder.offset = assertCountOffset;
+  formattedWrite(&builder.append, "%s", argIndex);
+  builder.offset = codeSize;
+  
+  return builder.createString();
+}
+
+immutable importFunc = immutable FuncAndPattern("handleImport", importPattern);
+mixin(importFunc.genFunc()~q{
+{
+  processor.findAndImport(constructSymbol.lineNumber, name.toUtf8);
+  //foreach(name; names) {
+  //processor.findAndImport(constructSymbol.lineNumber, name.toUtf8);
+  //}
+  return null;
+}});
+mixin(genConstructPatternThunk("importThunk", importFunc));
+immutable importConstructDefinition = new immutable InternalImplementedConstruct
+  ([immutable PatternHandler(importPattern, &importThunk)], ConstructAttributes.init, null);
+   
+/*
 class ImportConstructDefinition : ConstructDefinition
 {
   this()
   {
-    super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null);
+    super(0, null, ConstructAttributes.init, null, null, null);
   }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+						   const(ConstructObject)[] objects, size_t* argIndex) const
   {
     while(true) {
       auto object = processor.consumeValue(constructSymbol, objects, argIndex);
@@ -928,25 +1172,8 @@ class ImportConstructDefinition : ConstructDefinition
     return null;
   }
 }
-
-/*
-const(T) nextArg(T)(ConstructProcessor* processor, const(ConstructDefinition) construct,
-             const(ConstructObject)[] objects, size_t* argIndex)
-{
-  if(*argIndex >= objects.length) {
-    // TODO: get line number
-    throw processor.semanticError(0, format("construct '%s' expects %s but reached the end of input", construct.name, An(T.staticTypeName)));
-  }
-
-  auto object = objects[*argIndex];
-  auto casted = object.as!T;
-  if(!casted) {
-    throw processor.semanticError(object.lineNumber, format("construct '%s' expects %s but got %s", construct.name, An(T.staticTypeName), An(object.typeName)));
-  }
-  (*argIndex)++;
-  return casted;
-}
 */
+
 
 const(ConstructParam)[] parseRequiredParams(ConstructProcessor* processor, const(ConstructList) list)
 {
@@ -1004,11 +1231,59 @@ const(ConstructParam)[] parseRequiredParams(ConstructProcessor* processor, const
 }
 
 
+
+immutable defconFunc1 = immutable FuncAndPattern("handleDefcon1", defconPattern1);
+mixin(defconFunc1.genFunc()~q{
+{
+  ConstructAttributes attributes;
+  const(ConstructParam)[] requiredParams = parseRequiredParams(processor, pattern);
+  /*
+  auto nodes = new PatternNode[requiredParams.length];
+  foreach(i, param; requiredParams) {
+    nodes[i] = PatternNode(null, CountType.one, param.type.matcher);
+  }
+  */
+  auto backendFunc = loadConstructBackend(name.value);
+  if(backendFunc == null) {
+    throw processor.semanticError(name.lineNumber, format
+                                  ("the backend does not implement construct '%s'", name));
+  }
+  processor.addSymbol(name.value, new FunctionConstructDefinition
+                      (/*Pattern(nodes), */constructSymbol.lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, backendFunc));
+  return null;
+}});
+
+immutable defconFunc2 = immutable FuncAndPattern("handleDefcon2", defconPattern2);
+mixin(defconFunc2.genFunc()~q{
+{
+  ConstructAttributes attributes;
+  const(ConstructParam)[] requiredParams = parseRequiredParams(processor, pattern);
+  auto nodes = new PatternNode[requiredParams.length];
+  foreach(i, param; requiredParams) {
+    if(param.type is null) {
+      nodes[i] = PatternNode(null, CountType.one, Matcher.anything);
+    } else {
+      nodes[i] = PatternNode(null, CountType.one, param.type.matcher);
+    }
+  }
+  
+  processor.addSymbol(name.value, new ConstructWithBlockDefinition
+                      (Pattern(nodes), constructSymbol.lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, implementation));
+  return null;
+}});
+
+mixin(genConstructPatternThunk("defconThunk1", defconFunc1));
+mixin(genConstructPatternThunk("defconThunk2", defconFunc2));
+immutable defconConstructDefinition = new immutable InternalImplementedConstruct
+  ([immutable PatternHandler(defconPattern1, &defconThunk1),
+    immutable PatternHandler(defconPattern2, &defconThunk2)],
+   ConstructAttributes.init, null);
+/*
 class DefconConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
+  this() { super(defconPattern, 0, null, ConstructAttributes.init, null, null, null); this.handler = &defconThunk; }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+						   const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto constructName = processor.consumeSymbol(constructSymbol, objects, argIndex).value;
 
@@ -1045,7 +1320,7 @@ class DefconConstructDefinition : ConstructDefinition
     //
     if(implementation) {
       processor.addSymbol(constructName, new ConstructWithBlockDefinition
-                          (undefinedPattern, lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, implementation));
+                          (lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, implementation));
     } else {
       auto backendFunc = loadConstructBackend(constructName);
       if(backendFunc == null) {
@@ -1053,17 +1328,37 @@ class DefconConstructDefinition : ConstructDefinition
                                       ("the backend does not implement construct '%s'", constructName));
       }
       processor.addSymbol(constructName, new FunctionConstructDefinition
-                          (undefinedPattern, lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, backendFunc));
+                          (lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, backendFunc));
     }
     return null;
   }
 }
+*/
+
+
+immutable toSymbolFunc1 = immutable FuncAndPattern("handleToSymbol1", oneSymbolPattern);
+mixin(toSymbolFunc1.genFunc()~q{
+{
+  return symbol;
+}});
+immutable toSymbolFunc2 = immutable FuncAndPattern("handleToSymbol2", oneStringPattern);
+mixin(toSymbolFunc2.genFunc()~q{
+{
+  return new ConstructSymbol(string_.lineNumber, string_.toUtf8());
+}});
+
+mixin(genConstructPatternThunk("toSymbolThunk1", toSymbolFunc1));
+mixin(genConstructPatternThunk("toSymbolThunk2", toSymbolFunc2));
+immutable toSymbolConstructDefinition = new immutable InternalImplementedConstruct
+  ([immutable PatternHandler(oneSymbolPattern, &toSymbolThunk1),
+    immutable PatternHandler(oneStringPattern, &toSymbolThunk2)],
+   ConstructAttributes.init, null);
 
 class DeftypeConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+						   const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto typeName = processor.consumeSymbol(constructSymbol, objects, argIndex).value;
     ConstructType type;
@@ -1088,19 +1383,25 @@ class DeftypeConstructDefinition : ConstructDefinition
     return null;
   }
 }
-class ToSymbolRefConstructDefinition : ConstructDefinition
+
+
+
+immutable patternConstructPattern = immutable Pattern
+  ([immutable PatternNode("patternList", CountType.one, Matcher.list)]);
+immutable patternFunc = immutable FuncAndPattern("handlePattern", patternConstructPattern);
+mixin(patternFunc.genFunc()~q{
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    return processor.consumeSymbol(constructSymbol, objects, argIndex);
-  }
-}
+  return new ConstructPattern(patternList.lineNumber, processPattern(processor, patternList));
+}});
+mixin(genConstructPatternThunk("patternThunk", patternFunc));
+immutable patternConstructDefinition = new immutable InternalImplementedConstruct
+  ([immutable PatternHandler(patternConstructPattern, &patternThunk)], ConstructAttributes.init, null);
+   
+
 class AddSymbolsToCallerConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto code = processor.consumeTypedValue!ConstructBlock(constructSymbol, objects, argIndex);
@@ -1123,7 +1424,7 @@ class AddSymbolsToCallerConstructDefinition : ConstructDefinition
 class CallerScopeConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     //auto forwardList = 
@@ -1144,8 +1445,8 @@ class CallerScopeConstructDefinition : ConstructDefinition
 */
 class ExecConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto code = processor.consumeTypedValue!ConstructBlock(constructSymbol, objects, argIndex);
@@ -1154,8 +1455,8 @@ class ExecConstructDefinition : ConstructDefinition
 }
 class ThrowConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto message = processor.consumeTypedValue!ConstructString(constructSymbol, objects, argIndex);
@@ -1164,8 +1465,8 @@ class ThrowConstructDefinition : ConstructDefinition
 }
 class TryConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(/*tryPattern, */0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto code = processor.consumeTypedValue!ConstructBlock(constructSymbol, objects, argIndex);
@@ -1209,10 +1510,23 @@ class TryConstructDefinition : ConstructDefinition
     }
   }
 }
+
+
+immutable letFunc = immutable FuncAndPattern("handleLet", setletPattern);
+mixin(letFunc.genFunc()~q{
+{
+  processor.addSymbol(name.value, value);
+  return (break_ is null) ? value : null;
+}});
+//pragma(msg, genConstructPatternThunk("letThunk2", letFunc));
+mixin(genConstructPatternThunk("letThunk", letFunc));
+immutable letConstructDefinition = new immutable InternalImplementedConstruct
+  ([immutable PatternHandler(setletPattern, &letThunk)], ConstructAttributes.init, null);
+/*
 class LetConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(letPattern, 0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto symbol = processor.consumeSymbol(constructSymbol, objects, argIndex).value;
@@ -1231,32 +1545,34 @@ class LetConstructDefinition : ConstructDefinition
     return value;
   }
 }
-class SetConstructDefinition : ConstructDefinition
-{
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    auto symbol = processor.consumeSymbol(constructSymbol, objects, argIndex).value;
-    auto value = processor.consumeValue(constructSymbol, objects, argIndex);
-    if(value is null) {
-      throw processor.semanticError(constructSymbol.lineNumber, "let construct does not work if the source expression evaluates to null");
-    }
-    processor.setSymbol(constructSymbol.lineNumber, symbol, value);
+*/
 
-    if(*argIndex < objects.length) {
-      if(objects[*argIndex].isObjectBreak) {
-        (*argIndex)++;
-        return null;
-      }
-    }
-    return value;
-  }
-}
+immutable setFunc = immutable FuncAndPattern("handleSet", setletPattern);
+mixin(setFunc.genFunc()~q{
+{
+  processor.setSymbol(name.lineNumber, name.value, value);
+  return (break_ is null) ? value : null;
+}});
+//pragma(msg, genConstructPatternThunk("setThunk2", setFunc));
+mixin(genConstructPatternThunk("setThunk", setFunc));
+immutable setConstructDefinition = new immutable InternalImplementedConstruct
+  ([immutable PatternHandler(setletPattern, &setThunk)], ConstructAttributes.init, null);
+
+
+immutable letSetFunc = immutable FuncAndPattern("handleLetSet", setletPattern);
+mixin(letSetFunc.genFunc()~q{
+{
+  processor.letSetSymbol(name.value, value);
+  return (break_ is null) ? value : null;
+}});
+mixin(genConstructPatternThunk("letSetThunk", letSetFunc));
+immutable letSetConstructDefinition = new immutable InternalImplementedConstruct
+  ([immutable PatternHandler(setletPattern, &letSetThunk)], ConstructAttributes.init, null);
+/*
 class LetSetConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto symbol = processor.consumeSymbol(constructSymbol, objects, argIndex).value;
@@ -1275,11 +1591,12 @@ class LetSetConstructDefinition : ConstructDefinition
     return value;
   }
 }
+*/
 
 class IfConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto condition = processor.consumeTypedValue!ConstructBool(constructSymbol, objects, argIndex);
@@ -1298,8 +1615,8 @@ class IfConstructDefinition : ConstructDefinition
 
 class EqualsConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.bool_), null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.bool_), null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto left  = processor.consumeValue(constructSymbol, objects, argIndex);
@@ -1316,8 +1633,8 @@ class EqualsConstructDefinition : ConstructDefinition
 }
 class ListOfConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.list), null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.list), null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto type = processor.consumeTypedValue!ConstructType(constructSymbol, objects, argIndex);
@@ -1326,8 +1643,8 @@ class ListOfConstructDefinition : ConstructDefinition
 }
 class TypeOfConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.type), null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.type), null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto object = processor.consumeValue(constructSymbol, objects, argIndex);
@@ -1339,8 +1656,8 @@ class TypeOfConstructDefinition : ConstructDefinition
 }
 class ItemTypeConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.type), null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.type), null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto object = processor.consumeTypedValue!ConstructList(constructSymbol, objects, argIndex);
@@ -1350,8 +1667,8 @@ class ItemTypeConstructDefinition : ConstructDefinition
 }
 class TypedConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto type = processor.consumeTypedValue!ConstructType(constructSymbol, objects, argIndex);
@@ -1361,8 +1678,8 @@ class TypedConstructDefinition : ConstructDefinition
 }
 class ForEachConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto forEachArgs = processor.consumeTypedValue!ConstructList(constructSymbol, objects, argIndex);
@@ -1455,8 +1772,8 @@ class ForEachConstructDefinition : ConstructDefinition
 }
 class MallocConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto length = processor.consumeTypedValue!ConstructUint(constructSymbol, objects, argIndex);
@@ -1465,8 +1782,8 @@ class MallocConstructDefinition : ConstructDefinition
 }
 class StringByteLengthConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.uint_), null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.uint_), null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto stringValue = processor.consumeTypedValue!ConstructString(constructSymbol, objects, argIndex).unconst;
@@ -1477,8 +1794,8 @@ class StringByteLengthConstructDefinition : ConstructDefinition
 /*
 class StringAllocConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto type = processor.consumeTypedValue!ConstructType(constructSymbol, objects, &argIndex).unconst;
@@ -1503,8 +1820,8 @@ class StringAllocConstructDefinition : ConstructDefinition
 */
 class StrcpyConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     //auto dest   = processor.consumeTypedValue!ConstructString(constructSymbol, objects, &argIndex).unconst;
@@ -1516,8 +1833,8 @@ class StrcpyConstructDefinition : ConstructDefinition
 }
 class MemcpyConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     throw imp("memcpy");
@@ -1525,8 +1842,8 @@ class MemcpyConstructDefinition : ConstructDefinition
 }
 class NotConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.bool_), null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.bool_), null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto object = processor.consumeValue(constructSymbol, objects, argIndex);
@@ -1541,8 +1858,8 @@ class NotConstructDefinition : ConstructDefinition
 }
 class AddConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto leftNumber  = processor.consumeTypedValue!ConstructNumber(constructSymbol, objects, argIndex);
@@ -1552,8 +1869,8 @@ class AddConstructDefinition : ConstructDefinition
 }
 class ReturnConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.anything), null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.anything), null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto next = processor.consumeValue(constructSymbol, objects, argIndex);
@@ -1567,8 +1884,8 @@ class ReturnConstructDefinition : ConstructDefinition
 }
 class StructConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     throw imp("struct construct");
@@ -1579,8 +1896,8 @@ class StructConstructDefinition : ConstructDefinition
 
 class DefclassConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     throw imp("defclass");
@@ -1590,8 +1907,8 @@ class DefclassConstructDefinition : ConstructDefinition
 
 class SemanticsConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     throw imp("semantics construct");
@@ -1599,8 +1916,8 @@ class SemanticsConstructDefinition : ConstructDefinition
 }
 class DumpScopeStackConstructDefinition : ConstructDefinition
 {
-  this() { super(undefinedPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) process(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     processor.printScopeStack();

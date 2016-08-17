@@ -5,7 +5,7 @@
 // Function Constructs
 //
 
-defcon message;
+defcon message();
 //defcon function(name symbol);
 
 

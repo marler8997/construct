@@ -1,8 +1,8 @@
 module backend;
 
 import std.stdio  : write, writef, writeln, writefln, File, stdout;
-import std.file   : mkdir, exists, setExtension, baseName;
-import std.path   : dirName, buildNormalizedPath;
+import std.file   : mkdir, exists;
+import std.path   : dirName, setExtension, baseName, buildNormalizedPath;
 import std.string : format;
 import std.conv   : to;
 
@@ -45,12 +45,15 @@ const(ConstructObject) messageHandler(ConstructProcessor* processor,
     }
     if(object.isObjectBreak) {
       break;
-    } else if(auto string_ = object.asConstructUtf8) {
-      write(string_.value);
+    } else if(auto string_ = object.asConstructString) {
+      write(string_.toUtf8());
     } else if(auto number = object.asConstructUint) {
       writef("%s", number.value);
     } else if(auto bool_ = object.asConstructBool) {
       write(bool_.value ? "true" : "false");
+    } else if(auto symbol = object.asConstructSymbol) {
+      write("symbol:");
+      write(symbol.value);
     } else {
       throw imp(format("message printing object of type %s", object.typeName));
     }
