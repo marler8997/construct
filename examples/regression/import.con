@@ -1,6 +1,6 @@
 // -*-mode: c;-*-
 // Enables Syntax Highlighting for github and emacs
-import "regression/imported";
+import "regression/imported"
 
 // call the imported construct
 aConstructDefinedInDevImport

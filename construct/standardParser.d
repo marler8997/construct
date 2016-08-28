@@ -12,17 +12,16 @@ symbolString ::= "'" symbol
 
 module construct.standardParser;
 
+import std.format : format, formattedWrite;
 import std.stdio  : writeln, writefln, stdout;
 import std.array  : appender, Appender;
 import std.file   : read, exists, mkdir;
 import std.path   : baseName, dirName, buildNormalizedPath;
-import std.string : format;
-import std.format : formattedWrite;
 import std.conv   : to;
-
-import utf8;
 import construct.ir;
 import construct.parser : ConstructParseException;
+
+import utf8;
 
 //version = VerboseTests;
 
@@ -31,8 +30,9 @@ import construct.parser : ConstructParseException;
 struct AsciiPrint
 {
   dchar c;
-  void toString(scope void delegate(const(char)[]) sink) const
+  void toString()(scope void delegate(const(char)[]) sink) const pure
   {
+    //alias errorHandling = ErrorHandling.assert_;
     if(c >= 127) {
       if(c <= 255) {
 	formattedWrite(sink, "\\x%02x", c);
@@ -61,8 +61,9 @@ struct AsciiPrint
 struct AsciiPrintString
 {
   const(char)[] str;
-  void toString(scope void delegate(const(char)[]) sink) const
+  void toString()(scope void delegate(const(char)[]) sink) const
   {
+    //alias errorHandling = ErrorHandling.assert_;
     const(char)* next = str.ptr;
     const char* limit = next + str.length;
     while(next < limit) {
@@ -81,13 +82,14 @@ enum ErrorType {
 class ConstructCFamilyParseException : ConstructParseException
 {
   ErrorType type;
-  this(ErrorType type, size_t constructLineNumber, string msg, string codeFile = __FILE__, size_t codeLine = __LINE__) {
+  this(ErrorType type, size_t constructLineNumber, string msg,
+       string codeFile = __FILE__, size_t codeLine = __LINE__) pure {
     super(constructLineNumber, msg, codeFile, codeLine);
     this.type = type;
   }
 }
 
-private bool isFirstCharacterOfSymbol(dchar c)
+private bool isFirstCharacterOfSymbol(dchar c) pure
 {
   if(c >= 'A') {
     if(c <= 'Z') return true;
@@ -96,7 +98,7 @@ private bool isFirstCharacterOfSymbol(dchar c)
   }
   return c == '-';
 }
-private bool isSymbolCharacter(dchar c)
+private bool isSymbolCharacter(dchar c) pure
 {
   if(c >= 'A') {
     if(c <= 'Z') return true;
@@ -109,7 +111,7 @@ private bool isSymbolCharacter(dchar c)
   return (c <= '9');
 }
 
-const(ConstructObject)[] parse(T)(const(char)[] code) if(isConstructBuilder!(T))
+const(ConstructObject)[] parse(T)(const(char)[] code) pure if(isConstructBuilder!(T))
 {
   auto consumer = ConstructConsumer!T(code.ptr, code.ptr + code.length);
   return consumer.parse();
@@ -131,7 +133,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   }
   State state;
 
-  this(const(char)* start, const char* limit, bool keepComments = false)
+  this(const(char)* start, const char* limit, bool keepComments = false) pure
   {
     this.limit = limit;
     this.keepComments = keepComments;
@@ -148,7 +150,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   //     c is character pointed to by cpos
   //     next points to next character
   //   }
-  final void skipWhitespace()
+  final void skipWhitespace() pure
   {
     dchar c;
     const(char)* cpos;
@@ -176,7 +178,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
 
   // InputState:
   //   next points to first character
-  final const(ConstructObject)[] parse()
+  final const(ConstructObject)[] parse() pure
   {
     if(keepComments) {
       imp("keep comments");
@@ -195,7 +197,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   //     next points to character after cpos
   //     Note: I think c must be '}' or ')'
   //   }
-  private final void readChar()
+  private final void readChar() pure
   {
     state.cpos = state.next;
     if(state.next < limit) {
@@ -212,7 +214,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   //     c contains char pointed to by c
   //     next points to next char
   //   }
-  private final void parse(char context, ref T objects)
+  private final void parse(char context, ref T objects) pure
   {
     
     while(true) {
@@ -322,13 +324,13 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
         auto symbolLineNumber = state.lineNumber;
 	auto symbol = parseSymbol();
 	if(state.cpos >= limit) {
-	  objects.put(ConstructObject.fromUnquoted(symbolLineNumber, symbol));
+	  objects.put(new ConstructSymbol(symbolLineNumber, symbol));
 	  break;
 	}
 	state.next = state.cpos; // rewind
 	skipWhitespace();
 	if(state.cpos >= limit) {
-	  objects.put(ConstructObject.fromUnquoted(symbolLineNumber, symbol));
+	  objects.put(new ConstructSymbol(symbolLineNumber, symbol));
 	  break;
 	}
         
@@ -338,7 +340,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
 	  continue;
 	}
 
-	objects.put(ConstructObject.fromUnquoted(symbolLineNumber, symbol));
+	objects.put(new ConstructSymbol(symbolLineNumber, symbol));
 	// don't need to go to the beginning of the loop because we're already at the next character
 	goto AT_NEXT_ARG;
       }
@@ -364,7 +366,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   //     c contains char pointed to by cpos
   //     next points to char after cpos
   //   }
-  private final ConstructObject parseNamedObject()
+  private final ConstructObject parseNamedObject() pure
   {
     while(true) {
       skipWhitespace();
@@ -424,7 +426,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
       if(isFirstCharacterOfSymbol(c)) {
         auto symbolLineNumber = state.lineNumber;
         auto symbol = parseSymbol();
-        return ConstructObject.fromUnquoted(symbolLineNumber, symbol);
+        return new ConstructSymbol(symbolLineNumber, symbol);
       }
       
       if(c == ',') {
@@ -441,7 +443,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   //   next points to character after opening quote
   // OutputState:
   //   next points to character after closing quote
-  private final const(char)[] parseQuoted()
+  private final const(char)[] parseQuoted() pure
   {
     auto next = state.next;
     while(true) {
@@ -470,7 +472,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   //     c is first character after number
   //     next points to character after c
   //   }
-  private final const(char)[] parseNumber()
+  private final const(char)[] parseNumber() pure
   {
     auto start = state.cpos;
     auto next = state.next;
@@ -501,7 +503,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   //     c is first character after name
   //     next points to character after c
   //   }
-  private final const(char)[] parseSymbol()
+  private final const(char)[] parseSymbol() pure
   {
     auto next = state.next;
     while(next < limit) {
@@ -527,7 +529,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   //   next points to next character
   // OutputState:
   //   next points to character after comment
-  private final const(char)[] parseComment()
+  private final const(char)[] parseComment() pure
   {
     readChar();
     if(state.cpos >= limit) {
@@ -583,52 +585,55 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
        ("expected '*' or '/' after '/', but got '%s'", AsciiPrint(state.c)));
   }
 
-  final void debugCurrentState() const {
-    writefln("c    : '%s'", AsciiPrint(state.c));
+  /*
+  final void debugCurrentState() const pure {
+    debug writefln("c    : '%s'", AsciiPrint(state.c));
     if(state.cpos) {
       if(state.cpos >= limit) {
-	writefln("cpos : %s (limit)", state.cpos);
+        debug writefln("cpos : %s (limit)", state.cpos);
       } else {
-	writefln("cpos : %s -> '%s'", state.cpos, AsciiPrint(*state.cpos));
+        debug writefln("cpos : %s -> '%s'", state.cpos, AsciiPrint(*state.cpos));
       }
     } else {
-      writefln("cpos : null", state.cpos);
+      debug writefln("cpos : null", state.cpos);
     }
     if(state.next) {
       if(state.next >= limit) {
-	writefln("next : %s (limit)", state.next);
+        debug writefln("next : %s (limit)", state.next);
       } else {
-	writefln("next : %s -> '%s'", state.next, AsciiPrint(*state.next));
+        debug writefln("next : %s -> '%s'", state.next, AsciiPrint(*state.next));
       }
     } else {
-      writefln("next : null", state.next);
+      debug writefln("next : null", state.next);
     }
-    stdout.flush();
+    debug stdout.flush();
   }
+  */
 }
 
 unittest
 {
   void test(const(char)[] code, ConstructObject[] expected = null, size_t testLine = __LINE__)
   {
+    alias errorHandling = ErrorHandling.assert_;
     version(VerboseTests) {
-      writeln("---------------------------------------");
-      writefln("[TEST] \"%s\"", AsciiPrintString(code));
+      debug writeln("---------------------------------------");
+      debug writefln("[TEST] \"%s\"", AsciiPrintString(code));
       stdout.flush();
     }
     auto codeTree = parse!(Appender!(const(ConstructObject)[]))(code);
     if(expected) {
       if(codeTree.length != expected.length) {
-	writefln("Expected: %s", expected);
-	writefln("Actual  : %s", codeTree);
+	debug writefln("Expected: %s", expected);
+	debug writefln("Actual  : %s", codeTree);
 	assert(0, format("Expected %s construct objects but got %s (testline %s)",
                          expected.length, codeTree.length, testLine));
       }
       foreach(i; 0..expected.length) {
 	if(!codeTree[i].equals(expected[i])) {
-	  writefln("Expected: %s", expected[i]);
-	  writefln("Actual  : %s", codeTree[i]);
-	  stdout.flush();
+	  debug writefln("Expected: %s", expected[i]);
+	  debug writefln("Actual  : %s", codeTree[i]);
+	  debug stdout.flush();
 	  assert(0, format("Construct at index %s does not match (testline %s)", i, testLine));
 	}
       }
@@ -648,8 +653,8 @@ unittest
 		       expectedError, testLine, AsciiPrintString(code)));
     } catch(ConstructCFamilyParseException e) {
       if(e.type != expectedError) {
-	writefln("WrongException: %s", e);
-	stdout.flush();
+	debug writefln("WrongException: %s", e);
+	debug stdout.flush();
 	assert(0, format("Expected error '%s' but got '%s' (testline %s)", expectedError, e.type, testLine));
       }
       version(VerboseTests) {
@@ -759,8 +764,8 @@ unittest
   test("a ( ({b;c;}) ) ;", [symbol(1, "a"), list(1, list(1, block(1, symbol(1, "b"), break_, symbol(1, "c"), break_))), break_]);
   test("a ({b;c;}) {}", [symbol(1, "a"), list(1, block(1, symbol(1, "b"), break_, symbol(1, "c"), break_)), block(1)]);
   // Primitive  types
-  test("a int;" , [symbol(1, "a"), type(1, prim.int_), break_]);
-  test("a uint;" , [symbol(1, "a"), type(1, prim.uint_), break_]);
+  test("a int;" , [symbol(1, "a"), symbol(1, "int"), break_]);
+  test("a uint;" , [symbol(1, "a"), symbol(1, "uint"), break_]);
 
   // Quoted Strings
   testError(ErrorType.endedEarly, "a \"");
@@ -840,10 +845,6 @@ unittest
   testError(ErrorType.endedEarly, "a=\" ");
   test("a=\"a string!\";", [named(1, "a", string_(1, "a string!")), break_]);
 
-
-
-
-
   /*
   testError(ErrorType.invalidChar, "a b=/!");
   testError(ErrorType.invalidChar, "a b=/\"");
@@ -864,10 +865,10 @@ unittest
   */
 
   // Regression Tests
-  test("null", [null_(1)]);
-  test("null;", [null_(1), break_]);
-  test("thrownError = null;", [named(1, "thrownError", null_(1)), break_]);
-  test("let thrownError = null;", [symbol(1, "let"), named(1, "thrownError", null_(1)), break_]);
+  test("null", [symbol(1, "null")]);
+  test("null;", [symbol(1, "null"), break_]);
+  test("thrownError = null;", [named(1, "thrownError", symbol(1, "null")), break_]);
+  test("let thrownError = null;", [symbol(1, "let"), named(1, "thrownError", symbol(1, "null")), break_]);
 
   // Numbers
   test("0", [new ConstructUint(1, 0)]);

@@ -10,9 +10,11 @@ import std.string : format;
 import std.format : formattedWrite;
 
 import utf8;
+import backend : loadBackendConstructs;
+import construct.logging;
 import construct.ir;
 import construct.parser : SourceFile, getParser, ConstructParseException;
-import construct.processor : verbose, ImportPath, ConstructProcessor, SemanticException;
+import construct.processor : ImportPath, ConstructProcessor, SemanticException;
 
 void usage(string program)
 {
@@ -35,6 +37,17 @@ int main(string[] args)
     writeln("Error: too many command line arguments");
     return 1;
   }
+
+  // Check command line arguments
+  debug {
+  } else {
+    if(verbose) {
+      writeln("Error: cannot enable verbose logging because program was not compiled in debug mode");
+      return 1;
+    }
+  }
+
+  
 
   SourceFile constructFile = SourceFile(args[0]);
   if(!exists(constructFile.name)) {
@@ -71,6 +84,8 @@ int main(string[] args)
       //ImportPath(buildNormalizedPath("..","std"), "std"),
       ImportPath(constructFile.name.dirName),
       ]);
+  processor.loadExtendedConstructs();
+  loadBackendConstructs(&processor);
   //writeln("[CONC] Done loading constructs. Processing them...");
   //stdout.flush();
   try {

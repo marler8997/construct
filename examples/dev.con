@@ -6,7 +6,7 @@ This file is used to test features I'm developing for and features
 that I'm trying to keep working while developing.
 */
 
-import "util";
+import "util"
 
 defcon each(items list, itemSymbol symbol, code constructBlock)
 {

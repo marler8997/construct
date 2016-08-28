@@ -10,8 +10,9 @@ ignore
   should be ignored ( however, this, will still need valid syntax )
 }
 
-//defcon message (msg string);
-defcon message(msg string);
+//defcon message(msg string);
+//defcon message(messages many string, nameless constructBreak);
+
 
 // Create a construct that makes sure it gets a failure
 // The addSymbolsToParentScope means that the construct block will

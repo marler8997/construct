@@ -1,6 +1,6 @@
 // -*-mode: c;-*-
 // Enables Syntax Highlighting for github and emacs
-import "util";
+import "util"
 
 expectFail {
   set x 3 // expected error: x doesn't exist

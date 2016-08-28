@@ -1,17 +1,56 @@
 The Construct Programming Language
 ===================================================
-Construct is a very simple programming language.
-In fact, it's so simple it doesn't even have a syntax.
-Instead, construct is defined by a small set of data structures.
-These data structures fit inside the basic unit of the construct language, the "construct",
-which is simply a object with a name and some arguments.
-Then language consists entirely of construct objects.
+Construct is a programmable programming language.
+It starts with a set of basic data structures like string, numbers, symbols, lists and even code blocks.
+Using these basic data structures, it provides the means to create and compile the basic unit of logic called the 'construct'.
+A construct is a peice of code that consumes semantic objects during compilation.
+There are a set of predefined constructs, but the code itself can add new constructs and extend existing ones.
+Constructs are defined by a name, a pattern that consumes objects, and code to process those objects.
+Let's look at an example:
+```C
+defcon sayHello () {
+    message "Hello, World!";
+}
+```
+
+As the compiler reads this code, it will identify the `defcon` symbol as a predefined construct.
+The defcon construct has it's own pattern that will consume the rest of the code in this example.
+The `sayHello` symbol is passed to defcon and will be used as the symbol name for the newly defined construct.
+The parenthesis `()` include the pattern of objects that the `sayHello` construct will consume, since it
+is empty, `sayHello` does not consume any objects.
+The last part is the code block delimited by `{`curly braces`}`.
+In this case, it simply prints "Hello, World!" to the user.
+Executing this construct is a matter of writing the construct name as a symbol like this:
+```C
+sayHello
+sayHello
+// will print:
+// Hello, World!
+// Hello, World!
+```
+
+Now lets define another construct that does consume objects.
+```C
+defcon sayHelloTo(name string) {
+    message "Hello, " name "!";
+}
+```
+This construct includes the pattern `(name string)`. A pattern is a comma
+separated list of items that indicate what the construct consumes.
+In this case, it consumes one object called `name` that is of type `string`.
+This construct can be called like this:
+```C
+sayHelloTo "George"
+// will print:
+// Hello, George!
+```
+
+## Custom Backends
 
 What the constructs do depend on the libraries and the backend.
 One backend may execute the constructs, one may emit machine code, another
 may emit code in another programming language.
 
-The semantics of the constructs are defined by the 'semantics' construct.
 If you wanted to add a function definition and function call construct,
 you could write a library that defines these constructs and the code
 to intepret the semantics.  In fact this is what the std.procedural

@@ -4,6 +4,7 @@ import std.string : format;
 
 import construct.ir;
 import construct.patterns;
+import construct.primitives : tryPattern;
 
 
 IT round(IT,FT)(FT number) pure
@@ -556,12 +557,12 @@ class SvgNodeCreator : IMatcherVisitHandler
       svgNodes[nextIndex] = new SvgSingleNode(nextCountType, "block", settings);
     }
   }
-  final void visit(const(SubPatternMatcher) matcher)
+  final void visit(const(ConstructPattern) matcher)
   {
     if(nextName) {
-      svgNodes[nextIndex] = new SvgSubPatternNode(nextCountType, "(" ~ nextName ~ ")", settings, matcher.nodes);
+      svgNodes[nextIndex] = new SvgSubPatternNode(nextCountType, "(" ~ nextName ~ ")", settings, matcher.pattern.nodes);
     } else {
-      svgNodes[nextIndex] = new SvgSubPatternNode(nextCountType, "", settings, matcher.nodes);
+      svgNodes[nextIndex] = new SvgSubPatternNode(nextCountType, "", settings, matcher.pattern.nodes);
     }
   }
 }
@@ -628,20 +629,22 @@ void main()
 
   immutable bigTestPattern = immutable Pattern
   ([immutable PatternNode("tryBlock", CountType.one, Matcher.block),
-    immutable PatternNode("catchClauses", CountType.star, new immutable SubPatternMatcher
-			  ([immutable PatternNode(null, CountType.one, new immutable KeywordMatcher("catch")),
-			    immutable PatternNode("catchBlock", CountType.one, Matcher.block)])),
-
-    immutable PatternNode("testClause", CountType.star, new immutable SubPatternMatcher
-			  ([immutable PatternNode(null, CountType.one, new immutable KeywordMatcher("catch")),
-			    immutable PatternNode("subSubPattern", CountType.star, new immutable SubPatternMatcher
-                            ([immutable PatternNode("subSubClause", CountType.star, Matcher.string_),
-                              immutable PatternNode("subSubBlock" , CountType.one , Matcher.block)]))])),
-                                                    
-    immutable PatternNode("finallyClause", CountType.optional, new immutable SubPatternMatcher
-			  ([immutable PatternNode(null, CountType.one, new immutable KeywordMatcher("finally")),
-                            immutable PatternNode("attr", CountType.star, Matcher.symbol),
-			    immutable PatternNode("finallyBlock", CountType.one, Matcher.block)]))]);
+    immutable PatternNode("catchClauses", CountType.many, new immutable ConstructPattern
+			  (0, Pattern(
+				      ([immutable PatternNode(null, CountType.one, new immutable KeywordMatcher("catch")),
+					immutable PatternNode("catchBlock", CountType.one, Matcher.block)])))),
+    immutable PatternNode("testClause", CountType.many, new immutable ConstructPattern
+			  (0, Pattern(
+				      ([immutable PatternNode(null, CountType.one, new immutable KeywordMatcher("catch")),
+					immutable PatternNode("subSubPattern", CountType.many, new immutable ConstructPattern
+							      (0, Pattern(
+									  ([immutable PatternNode("subSubClause", CountType.many, Matcher.string_),
+									    immutable PatternNode("subSubBlock" , CountType.one , Matcher.block)]))))])))),
+    immutable PatternNode("finallyClause", CountType.optional, new immutable ConstructPattern
+			  (0, Pattern(
+				      ([immutable PatternNode(null, CountType.one, new immutable KeywordMatcher("finally")),
+					immutable PatternNode("attr", CountType.many, Matcher.symbol),
+					immutable PatternNode("finallyBlock", CountType.one, Matcher.block)]))))]);
   printSvg(bigTestPattern, File(`C:\temp\bigTestPattern.svg`, "w"), &settings);
 
   immutable testPattern = immutable Pattern
@@ -651,13 +654,13 @@ void main()
     ([immutable PatternNode("another long name",CountType.optional,Matcher.string_)]);
   printSvg(testPattern2, File(`C:\temp\out2.svg`, "w"), &settings);
   immutable testPattern3 = immutable Pattern
-    ([immutable PatternNode(null,CountType.star,Matcher.string_)]);
+    ([immutable PatternNode(null,CountType.many,Matcher.string_)]);
   printSvg(testPattern3, File(`C:\temp\out3.svg`, "w"), &settings);
   printSvg(tryPattern, File(`C:\temp\tryPattern.svg`, "w"), &settings);
 
   immutable basicSubPattern = immutable Pattern
-    ([immutable PatternNode(null,CountType.one,new immutable SubPatternMatcher
-                            ([immutable PatternNode(null,CountType.one,Matcher.string_)])
-                            )]);
+    ([immutable PatternNode(null,CountType.one,new immutable ConstructPattern
+                            (0, Pattern(([immutable PatternNode(null,CountType.one,Matcher.string_)])))
+					)]);
   printSvg(basicSubPattern, File(`C:\temp\basicSubPattern.svg`, "w"), &settings);
 }

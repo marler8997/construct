@@ -4,7 +4,7 @@ import std.stdio;
 // Utf8
 //
 class Utf8Exception : Exception {
-  this(string msg) {
+  this(string msg) pure {
     super(msg);
   }
 }
@@ -14,7 +14,7 @@ enum invalidEndMessage = "input ended with invalid UTF-8 character";
 // This method assumes that utf8 points to at least one character
 // and that the first non-valid pointer is at the limit pointer
 // (this means that utf8 < limit)
-dchar decodeUtf8(const(char)** utf8InOut, const char* limit)
+dchar decodeUtf8(const(char)** utf8InOut, const char* limit) pure
 {
   auto utf8 = *utf8InOut;
   dchar c = *utf8;

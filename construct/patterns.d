@@ -1,10 +1,11 @@
 module construct.patterns;
 
-import std.string : format;
-import std.format : formattedWrite;
+import std.format : format, formattedWrite;
 import std.conv   : to;
-import std.array  : appender;
+import std.array  : appender, Appender;
+import construct.logging;
 import construct.ir;
+import construct.processor : ConstructProcessor;
 
 version(unittest) {
   import std.stdio;
@@ -32,8 +33,8 @@ return-patter :: value? ;
 enum CountType {
   one,
   optional,
-  plus,
-  star,
+  oneOrMore,
+  many,
 }
 bool onlyOne(const CountType type) pure
 {
@@ -42,21 +43,21 @@ bool onlyOne(const CountType type) pure
 }
 bool isLoop(const CountType type) pure
 {
-  return type == CountType.plus ||
-    type == CountType.star;
+  return type == CountType.oneOrMore ||
+    type == CountType.many;
 }
 bool isOptional(const CountType type) pure
 {
   return type == CountType.optional ||
-    type == CountType.star;
+    type == CountType.many;
 }
-string codeTextPostfix(const CountType type)
+string codeTextPostfix(const CountType type) pure
 {
   final switch(type) {
-  case CountType.one     : return "";
-  case CountType.optional: return "?";
-  case CountType.plus    : return "+";
-  case CountType.star    : return "*";
+  case CountType.one      : return "";
+  case CountType.optional : return "?";
+  case CountType.oneOrMore: return "+";
+  case CountType.many     : return "*";
   }
 }
 
@@ -70,52 +71,51 @@ interface IMatcherVisitHandler
   void visit(const(PrimitiveTypeMatcher!ConstructList) matcher);
   void visit(const(PrimitiveTypeMatcher!ObjectBreak) matcher);
   void visit(const(PrimitiveTypeMatcher!ConstructBlock) matcher);
-  void visit(const(SubPatternMatcher) matcher);
+  void visit(const(ConstructPattern) matcher);
 }
 
-class Matcher {
-  string codeText;
-  this(string codeText) immutable
-  {
-    this.codeText = codeText;
-  }
-  @property bool matchesAnySymbolNext() const pure { return false; }
+interface Matcher {
+  @property abstract string codeText() const pure;
+  
+  @property abstract bool matchesAnySymbolNext() const pure;
   @property abstract string processorValueType() const pure;
-  @property string processorOptionalValueType() const pure
-  {
-    return processorValueType();
-  }
-  abstract bool match(const(ConstructObject) obj) const;
+  @property abstract string processorOptionalValueType() const pure;
+
+  abstract bool match(const(ConstructObject) obj) const pure;
 
   abstract void visit(IMatcherVisitHandler handler) const;
 
-  alias anything    = AnyMatcher.instance;
-  alias symbol      = SymbolMatcher.instance;
-  alias string_     = PrimitiveTypeMatcher!ConstructString.instance;
-  alias bool_       = PrimitiveTypeMatcher!ConstructBool.instance;
-  alias list        = PrimitiveTypeMatcher!ConstructList.instance;
-  alias objectBreak = PrimitiveTypeMatcher!ObjectBreak.instance;
-  alias block       = PrimitiveTypeMatcher!ConstructBlock.instance;
+  alias anything       = AnyMatcher.instance;
+  alias symbol         = SymbolMatcher.instance;
+  alias string_        = PrimitiveTypeMatcher!ConstructString.instance;
+  alias bool_          = PrimitiveTypeMatcher!ConstructBool.instance;
+  alias list           = PrimitiveTypeMatcher!ConstructList.instance;
+  alias constructBreak = PrimitiveTypeMatcher!ObjectBreak.instance;
+  alias block          = PrimitiveTypeMatcher!ConstructBlock.instance;
 }
 class AnyMatcher : Matcher
 {
   immutable static AnyMatcher instance = new immutable AnyMatcher();
-  private this() immutable { super("anything"); }
+  private this() immutable { }
+  @property override string codeText() const pure { return "anything"; }
+  @property override bool matchesAnySymbolNext() const pure { return false; }
   @property override string processorValueType() const pure { return "ConstructObject"; }
-  override bool match(const(ConstructObject) obj) const { return true; }
+  @property override string processorOptionalValueType() const pure { return "ConstructObject"; }
+  override bool match(const(ConstructObject) obj) const pure { return true; }
   final override void visit(IMatcherVisitHandler handler) const
   {
     handler.visit(this);
   }
 }
-
 class SymbolMatcher : Matcher
 {
   immutable static SymbolMatcher instance = new immutable SymbolMatcher();
-  private this() immutable { super("symbol"); }
+  private this() immutable { }
+  @property override string codeText() const pure { return "symbol"; }
   @property override bool matchesAnySymbolNext() const pure { return true; }
   @property override string processorValueType() const pure { return "ConstructSymbol"; }
-  override bool match(const(ConstructObject) obj) const
+  @property override string processorOptionalValueType() const pure { return "ConstructSymbol"; }
+  override bool match(const(ConstructObject) obj) const pure
   {
     throw new Exception("CodeBug: SymbolMatcher.match should never be called");
   }
@@ -128,11 +128,14 @@ class SymbolMatcher : Matcher
 class KeywordMatcher : Matcher
 {
   string keyword;
-  this(string keyword) immutable
+  string codeTextString;
+  this(string keyword) pure immutable
   {
-    super(format("'%s'", keyword));
     this.keyword = keyword;
+    this.codeTextString = format("\"%s\"", keyword);
   }
+  @property override string codeText() const pure { return codeTextString; }
+  @property override bool matchesAnySymbolNext() const pure { return false; }
   @property override string processorValueType() const pure
   {
     throw imp();
@@ -143,7 +146,7 @@ class KeywordMatcher : Matcher
     throw imp();
     //return T.processorOptionalValueType;
   }
-  override bool match(const(ConstructObject) obj) const
+  override bool match(const(ConstructObject) obj) const pure
   {
     throw imp();
   }
@@ -152,16 +155,15 @@ class KeywordMatcher : Matcher
     handler.visit(this);
   }
 }
-
-
 class PrimitiveTypeMatcher(T) : Matcher if( !is(T == ConstructSymbol) )
 {
   static immutable PrimitiveTypeMatcher!T instance =
     new immutable PrimitiveTypeMatcher!T();
   private this() immutable
   {
-    super(T.staticTypeName);
   }
+  @property override string codeText() const pure { return T.staticTypeName; }
+  @property override bool matchesAnySymbolNext() const pure { return false; }
   @property override string processorValueType() const pure
   {
     return T.processorValueType;
@@ -170,7 +172,7 @@ class PrimitiveTypeMatcher(T) : Matcher if( !is(T == ConstructSymbol) )
   {
     return T.processorOptionalValueType;
   }
-  override bool match(const(ConstructObject) obj) const
+  override bool match(const(ConstructObject) obj) const pure
   {
     return obj.as!T() !is null;
   }
@@ -179,9 +181,10 @@ class PrimitiveTypeMatcher(T) : Matcher if( !is(T == ConstructSymbol) )
     handler.visit(this);
   }
 }
-
+/*
 class SubPatternMatcher : Matcher
 {
+  string codeTextString;
   PatternNode[] nodes;
 
   bool haveCachedProcessorValueType;
@@ -201,10 +204,10 @@ class SubPatternMatcher : Matcher
       builder.append(node.countType.codeTextPostfix);
     }
     builder.append(")");
-    super(builder.createString());
+    this.codeTextString = builder.createString();
     this.nodes = nodes;
   }
-  
+  @property override string codeText() const pure { return codeTextString; }
   @property override bool matchesAnySymbolNext() const pure
   {
     return nodes.length > 0 && nodes[0].matcher.matchesAnySymbolNext;
@@ -219,7 +222,7 @@ class SubPatternMatcher : Matcher
     throw imp();
     //    return T.processorOptionalValueType;
   }
-  override bool match(const(ConstructObject) obj) const
+  override bool match(const(ConstructObject) obj) const pure
   {
     throw imp();
     //return obj.as!T() !is null;
@@ -229,6 +232,7 @@ class SubPatternMatcher : Matcher
     handler.visit(this);
   }
 }
+*/
 
 struct PatternNode
 {
@@ -240,13 +244,14 @@ struct PatternNode
   const(char)[] name;
   CountType countType;
   Matcher matcher;
-  this(const(char)[] name, CountType countType, immutable(Matcher) matcher)
+
+  this(const(char)[] name, CountType countType, immutable(Matcher) matcher) pure
   {
     this.name = name;
     this.countType = countType;
     this.matcher = matcher.unconst;
   }
-  this(const(char)[] name, CountType countType, immutable(Matcher) matcher) immutable
+  this(const(char)[] name, CountType countType, immutable(Matcher) matcher) pure immutable
   {
     this.name = cast(string)name;
     this.countType = countType;
@@ -257,11 +262,13 @@ struct PatternNode
     sink(matcher.codeText);
     sink(countType.codeTextPostfix);
   }
+  /*
   void generateDInterface(scope void delegate(const(char)[]) sink) const
   {
     throw imp("generateDInterface");
   }
-  bool tryConsume(const(ConstructObject)[] objects, size_t* argIndex) const
+  */
+  bool tryConsume(const(ConstructObject)[] objects, size_t* argIndex) const pure
   {
     auto index = *argIndex;
     if(index >= objects.length || !matcher.match(objects[index])) {
@@ -284,13 +291,16 @@ struct Pattern {
   const(PatternNode)[] nodes;
   void toString(scope void delegate(const(char)[]) sink) const
   {
-    //sink(name);
-    foreach(node; nodes) {
-      sink(" ");
+    sink("pattern (");
+    foreach(nodeIndex, node; nodes) {
+      if(nodeIndex > 0) {
+        sink(" ");
+      }
       node.toString(sink);
     }
+    sink(")");
   }
-  bool tryConsume(const(ConstructObject)[] objects, size_t* argIndex) const
+  bool tryConsume(const(ConstructObject)[] objects, size_t* argIndex) const pure
   {
     auto newIndex = *argIndex;
     foreach(node; nodes) {
@@ -301,7 +311,7 @@ struct Pattern {
     *argIndex = newIndex;
     return true;
   }
-  bool match(const(ConstructObject)[] objects) const
+  bool match(const(ConstructObject)[] objects) const pure
   {
     size_t index = 0;
     if(tryConsume(objects, &index)) {
@@ -309,24 +319,11 @@ struct Pattern {
     }
     return false;
   }
+  
 }
 
-
+immutable emptyPattern = immutable Pattern();
 immutable undefinedPattern = immutable Pattern();
-
-immutable defconPattern1 = immutable Pattern
-  ([immutable PatternNode("name", CountType.one, Matcher.symbol),
-    immutable PatternNode("pattern", CountType.one, Matcher.list),
-    immutable PatternNode(null, CountType.one, Matcher.objectBreak)]);
-immutable defconPattern2 = immutable Pattern
-  ([immutable PatternNode("name", CountType.one, Matcher.symbol),
-    immutable PatternNode("pattern", CountType.one, Matcher.list),
-    immutable PatternNode("implementation", CountType.one, Matcher.block)]);
-
-immutable importPattern = immutable Pattern
-  //([immutable PatternNode(CountType.plus, Matcher.string_),
-  ([immutable PatternNode("name", CountType.one, Matcher.string_),
-    immutable PatternNode(null, CountType.one , Matcher.objectBreak)]);
 
 //
 // Note: defcon <symbol> ...
@@ -336,36 +333,11 @@ immutable importPattern = immutable Pattern
 //         letset <constructName> combineConstructs <constructName> construct ...
 //
 
-//
-// The 'pattern' construct constructs a pattern.
-// it takes a list, and converts it to an internal pattern.
-//
-// Note: the '_' symbol is a special reserved symbol that means
-//       the symbol is hidden.
-//       defcon a (_ string)
-//       {
-//         // the string argument is hidden, it was consumed but can't be accessed
-//       }
-//       this is more useful for certain types such as keywords
-//defcon try (tryBlock block, catchBlocks CatchInfo list itemPrefix="catch", finallyBlock block prefix="finally")
-// (
-//  tryBlock block,
-//  catchClauses multi pattern(_ "catch", varName symbol, catchType type, catchBlock block),
-//  finallyClause optional pattern(_ "finally", finallyBlock block)
-//  )
-immutable tryPattern = immutable Pattern
-  ([immutable PatternNode("tryBlock", CountType.one, Matcher.block),
-    immutable PatternNode("catchClauses", CountType.star, new immutable SubPatternMatcher
-			  ([immutable PatternNode(null, CountType.one, new immutable KeywordMatcher("catch")),
-			    immutable PatternNode("catchBlock", CountType.one, Matcher.block)])),
-    immutable PatternNode("finallyClause", CountType.optional, new immutable SubPatternMatcher
-			  ([immutable PatternNode(null, CountType.one, new immutable KeywordMatcher("finally")),
-			    immutable PatternNode("finallyBlock", CountType.one, Matcher.block)]))]);
 
 immutable setletPattern = immutable Pattern
   ([immutable PatternNode("name", CountType.one, Matcher.symbol),
     immutable PatternNode("value", CountType.one, Matcher.anything),
-    immutable PatternNode("break_", CountType.optional, Matcher.objectBreak)]);
+    immutable PatternNode("break_", CountType.optional, Matcher.constructBreak)]);
 
 
 immutable oneSymbolPattern = immutable Pattern
@@ -374,30 +346,86 @@ immutable oneStringPattern = immutable Pattern
   ([immutable PatternNode("string_", CountType.one, Matcher.string_)]);
 
 
+// Assumption: *itemIndex < items.length
+CountType getCountType(const(ConstructObject)[] items, size_t* itemIndex) pure
+{
+  if(auto symbol = items[*itemIndex].asConstructSymbol){
+    if(symbol.value == "optional") {
+      (*itemIndex)++;
+      return CountType.optional;
+    } else if(symbol.value == "many") {
+      (*itemIndex)++;
+      return CountType.many;
+    } else if(symbol.value == "oneOrMore") {
+      (*itemIndex)++;
+      return CountType.oneOrMore;
+    } else if(symbol.value == "one") {
+      (*itemIndex)++;
+      return CountType.one;
+    }
+  }
+  return CountType.one;
+}
+
+immutable(Pattern) compileBasicPattern(string code)
+{
+  import construct.parser : standardParser;
+  const(ConstructObject)[] parsedObjects = standardParser!(Appender!(const(ConstructObject)[])).func(code);
+  assert(parsedObjects.length == 1);
+  auto list = parsedObjects[0].asConstructList;
+  assert(list);
+  return processBasicPattern(list);
+}
+
+immutable(Pattern) processBasicPattern(const(ConstructList) patternList)
+{
+  ConstructProcessor processor = ConstructProcessor(null);
+  return processPattern(&processor, patternList);
+}
 
 
 immutable(Pattern) processPattern(ConstructProcessor* processor, const(ConstructList) patternList)
 {
-  auto nodes = appender!(immutable(PatternNode)[])();
+  //auto nodes = appender!(PatternNode[])();
+  auto nodes = new immutable(PatternNode)[0];
+  void appendNode(immutable(PatternNode) node)
+  {
+    nodes ~= node;
+  }
   
   for(size_t itemIndex = 0;;) {
     if(itemIndex >= patternList.items.length) {
       break;
     }
 
-    auto nodeName = patternList.items[itemIndex].asConstructSymbol;
-    if(!nodeName) {
-      throw processor.semanticError(patternList.items[itemIndex].lineNumber, format
-				    ("expected defcon parameter name to be a symbol but got %s",
-				     An(patternList.items[itemIndex].typeName)));
+    const(char)[] nodeNameString;
+    {
+      auto nodeName = processor.tryConsumeSymbol(patternList.items, &itemIndex);
+      if(!nodeName) {
+        throw processor.semanticError(patternList.items[itemIndex].lineNumber, format
+                                      ("expected defcon parameter name to be a symbol but got %s",
+                                       An(patternList.items[itemIndex].typeName)));
+      }
+      nodeNameString = (nodeName.value == "nameless") ? null : nodeName.value;
     }
-    itemIndex++;
     if(itemIndex >= patternList.items.length) {
-      nodes.put(immutable PatternNode(nodeName.value, CountType.one, Matcher.anything));
+      appendNode(immutable PatternNode(nodeNameString, CountType.one, Matcher.anything));
       break;
     }
-
-    ConstructType nodeType;
+    // Get count type
+    CountType countType;
+    {
+      size_t newIndex = itemIndex;
+      countType = getCountType(patternList.items, &newIndex);
+      if(newIndex > itemIndex) {
+        itemIndex = newIndex;
+        if(itemIndex >= patternList.items.length) {
+          appendNode(immutable PatternNode(nodeNameString, countType, Matcher.anything));
+          break;
+        }
+      }
+    }
+    Matcher matcher;
     {
       auto object = processor.consumeValueAlreadyCheckedIndex(patternList.items, &itemIndex);
       if(object is null) {
@@ -405,11 +433,17 @@ immutable(Pattern) processPattern(ConstructProcessor* processor, const(Construct
 				      "expected the expression to return a type but returned null");
       }
       if(object.isListBreak) {
-        nodes.put(immutable PatternNode(nodeName.value, CountType.one, Matcher.anything));
+        appendNode(immutable PatternNode(nodeNameString, countType, Matcher.anything));
 	continue;
       }
-      nodeType = object.asConstructType.unconst;
-      if(nodeType is null) {
+      
+      if(auto nodeType = object.asConstructType) {
+	matcher = nodeType.matcher.unconst;
+      } else if(auto subPattern = object.asConstructPattern) {
+	matcher = subPattern.unconst;
+      } else if(auto keywordString = object.asConstructString) {
+	matcher = new immutable KeywordMatcher(keywordString.toUtf8).unconst;
+      } else {
 	throw processor.semanticError(object.lineNumber, format
 				      ("expected the expression to return a type but returned %s",
 				       An(object.typeName)));
@@ -417,31 +451,16 @@ immutable(Pattern) processPattern(ConstructProcessor* processor, const(Construct
     }
 
     if(itemIndex >= patternList.items.length) {
-      nodes.put(immutable PatternNode(nodeName.value, CountType.one, nodeType.matcher));
+      appendNode(immutable PatternNode(nodeNameString, countType, matcher.immutable_));
       break;
     }
     if(patternList.items[itemIndex].isListBreak) {
-      nodes.put(immutable PatternNode(nodeName.value, CountType.one, nodeType.matcher));
+      appendNode(immutable PatternNode(nodeNameString, countType, matcher.immutable_));
       itemIndex++;
       continue;
     }
 
-    CountType countType;
-    {
-      auto object = patternList.items[itemIndex++];
-      if(auto symbol = object.asConstructSymbol) {
-	if(symbol.value == "optional") {
-	  countType = CountType.optional;
-	} else {
-	  imp(format("pattern modifier '%s'", symbol.value));
-	}
-      } else {
-	throw processor.semanticError(object.lineNumber, format
-				      ("expected a symbol but got %s", An(object.typeName)));
-      }
-    }
-
-    nodes.put(immutable PatternNode(nodeName.value, countType, nodeType.matcher));
+    appendNode(immutable PatternNode(nodeNameString, countType, matcher.immutable_));
     if(itemIndex >= patternList.items.length) {
       break;
     }
@@ -454,33 +473,75 @@ immutable(Pattern) processPattern(ConstructProcessor* processor, const(Construct
     }
     itemIndex++;
   }
-  
-  return immutable Pattern(nodes.data);
+
+  return immutable Pattern(nodes);
+  //return immutable Pattern(nodes.data);
+  //return immutable Pattern(cast(immutable(PatternNode)[])nodes.data);
 }
+
 
 unittest
 {
-  writeln(importPattern);
-  writeln(setletPattern);
-  
-  assert(importPattern.match([string_("hello"), break_()]));
-  //assert(importPattern.match([string_("hello"), string_("world"), break_()]));
-  //importConstruct([string_("hello")]);
-  //importConstruct([string_("hello"), string_("world")]);
+  //writeln(importPattern);
+  //writeln(setletPattern);
 
-
-
+  size_t assertEqualCount = 0;
+  void assertEqual(immutable Pattern pattern, string patternString)
+  {
+    writefln("Testing pattern '%s'", patternString);
+    assert(pattern == compileBasicPattern(patternString));
+    assertEqualCount++;
+  }
   
-  
-  //writefln("GenFunc (import): %s", generateConstructFunction(importPattern, ["names"]));
-  
+  struct StringPatternPair
+  {
+    string string_;
+    immutable(PatternNode) pattern;
+  }
+  auto variants =
+    [
+     StringPatternPair("aName"                   , immutable PatternNode("aName", CountType.one, Matcher.anything)),
+     StringPatternPair("aName one"               , immutable PatternNode("aName", CountType.one, Matcher.anything)),
+     StringPatternPair("aName anything"          , immutable PatternNode("aName", CountType.one, Matcher.anything)),
+     StringPatternPair("aName one anything"      , immutable PatternNode("aName", CountType.one, Matcher.anything)),
 
-  
-  //auto letPattern
-    // the 'let' construct: grammar definition
-    //let-pattern ::= symbol object break?
+     StringPatternPair("nameless"                , immutable PatternNode(null, CountType.one, Matcher.anything)),
+     StringPatternPair("nameless one"            , immutable PatternNode(null, CountType.one, Matcher.anything)),
+     StringPatternPair("nameless anything"       , immutable PatternNode(null, CountType.one, Matcher.anything)),
+     StringPatternPair("nameless one anything"   , immutable PatternNode(null, CountType.one, Matcher.anything)),
 
-  // TODO: implement the pattern parser
+     StringPatternPair("aName optional"          , immutable PatternNode("aName", CountType.optional, Matcher.anything)),
+     StringPatternPair("aName optional anything" , immutable PatternNode("aName", CountType.optional, Matcher.anything)),
+
+     StringPatternPair("aName many"              , immutable PatternNode("aName", CountType.many, Matcher.anything)),
+     StringPatternPair("aName many anything"     , immutable PatternNode("aName", CountType.many, Matcher.anything)),
+
+     StringPatternPair("aName oneOrMore"         , immutable PatternNode("aName", CountType.oneOrMore, Matcher.anything)),
+     StringPatternPair("aName oneOrMore anything", immutable PatternNode("aName", CountType.oneOrMore, Matcher.anything)),
+
+     StringPatternPair("aName string"            , immutable PatternNode("aName", CountType.one, Matcher.string_)),
+     StringPatternPair("aName one string"        , immutable PatternNode("aName", CountType.one, Matcher.string_)),
+
+     StringPatternPair("nameless string"         , immutable PatternNode(null, CountType.one, Matcher.string_)),
+     StringPatternPair("nameless one string"     , immutable PatternNode(null, CountType.one, Matcher.string_)),
+     
+     StringPatternPair("aName optional string"   , immutable PatternNode("aName", CountType.optional, Matcher.string_)),
+
+     StringPatternPair("aName many string"       , immutable PatternNode("aName", CountType.many, Matcher.string_)),
+
+     StringPatternPair("aName oneOrMore string"  , immutable PatternNode("aName", CountType.oneOrMore, Matcher.string_)),
+     ];
+
+  foreach(variant; variants) {
+    auto pattern = immutable Pattern([variant.pattern]);
+    assertEqual(pattern, "("~variant.string_~")");
+    foreach(secondVariant; variants) {
+      auto twoParamPattern = immutable Pattern([variant.pattern, secondVariant.pattern]);
+      assertEqual(twoParamPattern, "("~variant.string_~", "~secondVariant.string_~")");
+    }
+  }
+
+  writefln("Tested %s patterns", assertEqualCount);
 }
 
 // TODO: this should be defined in the standard library

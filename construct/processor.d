@@ -1,69 +1,26 @@
 module construct.processor;
 
 import std.file   : exists, read;
+import std.format : format;
 import std.path   : setExtension, stripExtension, buildNormalizedPath;
 import std.array  : Appender, appender, isDynamicArray, ElementEncodingType;
-import std.string : startsWith, format, indexOf;
+import std.string : startsWith, indexOf;
 import std.conv   : to;
-import std.format : formattedWrite;
+import std.format : formattedWrite/*, format*/;
 
-import core.stdc.stdlib : malloc, free;
+import core.stdc.stdlib  : malloc, free;
 
+import construct.logging;
 import construct.patterns;
 import construct.ir;
 import construct.parser : SourceFile, ConstructParser, standardParser, ConstructParseException;
+import construct.primitives;
 
 import backend    : loadConstructBackend, loadBackendType;
 
-bool verbose;
-private enum LogLevel {
-  debug_,
-  info,
-  dev,
-  warning,
-  error,
-}
-private immutable string[] logLevelPrefix =
-  [
-   LogLevel.debug_  : "[DEBUG] ",
-   LogLevel.info    : "[INFO] ",
-   LogLevel.dev     : "[DEV] ",
-   LogLevel.warning : "[WARNING] ",
-   LogLevel.error   : "[ERROR] ",
-   ];
-private void log(A...)(LogLevel level, in char[] fmt, A args)
-{
-  import std.stdio : writefln, stdout;
-  if(verbose || (level > LogLevel.info)) {
-    writefln("[PROCESSOR] " ~ logLevelPrefix[level] ~ fmt, args);
-    stdout.flush();
-  }
-}
-void logDebug(A...)(in char[] fmt, A args)
-{
-  log(LogLevel.debug_, fmt, args);
-}
-void logInfo(A...)(in char[] fmt, A args)
-{
-  log(LogLevel.info, fmt, args);
-}
-void logDev(A...)(in char[] fmt, A args)
-{
-  log(LogLevel.dev, fmt, args);
-}
-void logWarning(A...)(in char[] fmt, A args)
-{
-  log(LogLevel.warning, fmt, args);
-}
-void logError(A...)(in char[] fmt, A args)
-{
-  log(LogLevel.error, fmt, args);
-}
-
-
 class ConstructThrownException : ConstructException
 {
-  this(size_t lineNumber, ConstructProcessor* processor, string msg)
+  this(size_t lineNumber, ConstructProcessor* processor, string msg) pure
   {
     super(msg, cast(string)processor.currentFile.name, lineNumber);
   }
@@ -72,7 +29,7 @@ class ConstructThrownException : ConstructException
 class SemanticException: ConstructException
 {
   Appender!(SemanticException[]) errorList;
-  this(size_t lineNumber, const(ConstructProcessor)* processor, string msg)
+  this(size_t lineNumber, const(ConstructProcessor)* processor, string msg) pure
   {
     const(char)[] filename;
     if(processor.currentConstruct && processor.currentConstruct.filename.length > 0) {
@@ -86,7 +43,7 @@ class SemanticException: ConstructException
 class InvalidConstructException: SemanticException
 {
   const(ConstructObject) obj;
-  this(const(ConstructObject) obj, const(ConstructProcessor)* processor, string msg)
+  this(const(ConstructObject) obj, const(ConstructProcessor)* processor, string msg) pure
   {
     super(obj.lineNumber, processor, msg);
     this.obj = obj;
@@ -109,7 +66,7 @@ class ImportFile
 
   SymbolTable publicSymbols;
 
-  this(const(char)[] importName, SourceFile sourceFile, const(char)[] code)
+  this(const(char)[] importName, SourceFile sourceFile, const(char)[] code) pure
   {
     this.importName = importName;
     this.sourceFile = sourceFile;
@@ -126,7 +83,7 @@ struct OneOrMore(T)
   T first;
   size_t moreCount;
   T[] buffer = void;
-  this(T first)
+  this(T first) pure
   {
     this.first = first;
   }
@@ -171,7 +128,7 @@ const(T) symbolAs(T)(SymbolEntryList entries)
   return null;
 }
 
-inout(char)[] splitAtDot(inout(char)[] symbol, inout(char)[]* rest)
+inout(char)[] splitAtDot(inout(char)[] symbol, inout(char)[]* rest) pure
 {
   foreach(i, c; symbol) {
     if(c == '.') {
@@ -211,63 +168,87 @@ struct ConstructProcessor
 
   ConstructDefinition currentConstruct;
 
-  this(ImportPath[] importPaths)
+  this(ImportPath[] importPaths) pure
   {
     this.importPaths = importPaths;
     // TODO: implement 'letset' which adds a symbol if it does not exist, or updates
     //       it if it does exist
     currentScope.symbols = 
-      ["import"     : SymbolEntryList(importConstructDefinition.unconst),
-       "defcon"     : SymbolEntryList(defconConstructDefinition.unconst), // TODO: support without unconst
-       "deftype"    : SymbolEntryList(singleton!DeftypeConstructDefinition()),
-       "pattern"    : SymbolEntryList(patternConstructDefinition.unconst),
-       "toSymbol"   : SymbolEntryList(toSymbolConstructDefinition.unconst),
-       //"callerScope": SymbolEntryList(singleton!CallerScopeConstructDefinition()),
-       "addSymbolsToCaller": SymbolEntryList(singleton!AddSymbolsToCallerConstructDefinition()),
-       "exec"       : SymbolEntryList(singleton!ExecConstructDefinition()),
-       "throw"      : SymbolEntryList(singleton!ThrowConstructDefinition()),
-       "try"        : SymbolEntryList(singleton!TryConstructDefinition()),
-       "let"        : SymbolEntryList(letConstructDefinition.unconst),
-       "set"        : SymbolEntryList(setConstructDefinition.unconst),
-       "letset"     : SymbolEntryList(letSetConstructDefinition.unconst),
-       "if"         : SymbolEntryList(singleton!IfConstructDefinition()),
-       "equals"     : SymbolEntryList(singleton!EqualsConstructDefinition()),
-       "listOf"     : SymbolEntryList(singleton!ListOfConstructDefinition()),
-       "typeOf"     : SymbolEntryList(singleton!TypeOfConstructDefinition()),
-       "itemType"   : SymbolEntryList(singleton!ItemTypeConstructDefinition()),
-       "typed"      : SymbolEntryList(singleton!TypedConstructDefinition()),
-       "foreach"    : SymbolEntryList(singleton!ForEachConstructDefinition()),
-       "malloc"     : SymbolEntryList(singleton!MallocConstructDefinition()),
-       //"stringAlloc": SymbolEntryList(singleton!StringAllocConstructDefinition()),
-       "stringByteLength": SymbolEntryList(singleton!StringByteLengthConstructDefinition()),
-       "strcpy"     : SymbolEntryList(singleton!StrcpyConstructDefinition()),
-       "memcpy"     : SymbolEntryList(singleton!MemcpyConstructDefinition()),
-       "not"        : SymbolEntryList(singleton!NotConstructDefinition()),
-       "add"        : SymbolEntryList(singleton!AddConstructDefinition()),
-       "return"     : SymbolEntryList(singleton!ReturnConstructDefinition()),
-
+      [
        //
-       // Classes
+       // Keyword Values
        //
-       "defclass"   : SymbolEntryList(singleton!DefclassConstructDefinition()),
-
-       
-       "semantics"  : SymbolEntryList(singleton!SemanticsConstructDefinition()),
-       "dumpScopeStack" : SymbolEntryList(singleton!DumpScopeStackConstructDefinition()),
+       "false"         : SymbolEntryList(falseConstructDefinition.unconst),
+       "true"          : SymbolEntryList(trueConstructDefinition.unconst),
+       "null"          : SymbolEntryList(nullConstructDefinition.unconst),
+       "constructBreak": SymbolEntryList(constructBreakConstructDefinition.unconst),
+       //
+       // Types
+       //
+       "anything"      : SymbolEntryList(anythingConstructDefinition.unconst),
+       "list"          : SymbolEntryList(listConstructDefinition.unconst),
+       "bool"          : SymbolEntryList(boolConstructDefinition.unconst),
+       "symbol"        : SymbolEntryList(symbolConstructDefinition.unconst),
+       "string"        : SymbolEntryList(stringConstructDefinition.unconst),
+       "constructBlock": SymbolEntryList(constructBlockConstructDefinition.unconst),
+       //
+       // Basic Constructs
+       //
+       "pattern"       : SymbolEntryList(PatternConstruct.definition.unconst),
        ];
   }
+  void loadExtendedConstructs()
+  {
+    currentScope.symbols["import"]    = SymbolEntryList(ImportConstruct.definition.unconst);
+    currentScope.symbols["defcon"]    = SymbolEntryList(DefconConstruct.definition.unconst); // TODO: support without unconst
+    currentScope.symbols["toSymbol"]  = SymbolEntryList(ToSymbolConstruct.definition.unconst);
+    //currentScope.symbols["deftype"]   = SymbolEntryList(singleton!DeftypeConstructDefinition());
+    //currentScope.symbols["exec"]      = SymbolEntryList(singleton!ExecConstructDefinition());
+    //currentScope.symbols["throw"]     = SymbolEntryList(singleton!ThrowConstructDefinition());
 
-  void pushScope(size_t startLineNumber, ScopeType type, bool openScope)
+    currentScope.symbols["try"]       = SymbolEntryList(tryConstructDefinition.unconst);
+
+    currentScope.symbols["let"]       = SymbolEntryList(LetConstruct.definition.unconst);
+    currentScope.symbols["set"]       = SymbolEntryList(SetConstruct.definition.unconst);
+    currentScope.symbols["letset"]    = SymbolEntryList(LetSetConstruct.definition.unconst);
+    currentScope.symbols["if"]        = SymbolEntryList(ifConstructDefinition.unconst);
+    currentScope.symbols["equals"]    = SymbolEntryList(EqualsConstruct.definition.unconst);
+    currentScope.symbols["not"]       = SymbolEntryList(NotConstruct.definition.unconst);
+    currentScope.symbols["foreach"]   = SymbolEntryList(foreachConstructDefinition.unconst);
+    //currentScope.symbols["listOf"]    = SymbolEntryList(singleton!ListOfConstructDefinition());
+    //currentScope.symbols["typeOf"]    = SymbolEntryList(singleton!TypeOfConstructDefinition());
+    //currentScope.symbols["itemType"]  = SymbolEntryList(singleton!ItemTypeConstructDefinition());
+    //currentScope.symbols["typed"]     = SymbolEntryList(singleton!TypedConstructDefinition());
+    //currentScope.symbols["malloc"]    = SymbolEntryList(singleton!MallocConstructDefinition());
+    //currentScope.symbols["stringByteLength"]= SymbolEntryList(singleton!StringByteLengthConstructDefinition());
+    //currentScope.symbols["strcpy"]    = SymbolEntryList(singleton!StrcpyConstructDefinition());
+    //currentScope.symbols["memcpy"]    = SymbolEntryList(singleton!MemcpyConstructDefinition());
+    //currentScope.symbols["add"]       = SymbolEntryList(singleton!AddConstructDefinition());
+    //currentScope.symbols["return"]    = SymbolEntryList(singleton!ReturnConstructDefinition());
+    currentScope.symbols["addSymbolsToCaller"] = SymbolEntryList(AddSymbolsToCallerConstruct.definition.unconst);
+
+       
+    //
+    // Classes
+    //
+    //currentScope.symbols["defclass"]  = SymbolEntryList(singleton!DefclassConstructDefinition());
+
+       
+    //currentScope.symbols["semantics"] = SymbolEntryList(singleton!SemanticsConstructDefinition());
+    //currentScope.symbols["dumpScopeStack"] = SymbolEntryList(singleton!DumpScopeStackConstructDefinition());
+  }
+
+  void pushScope(size_t startLineNumber, ScopeType type, bool openScope) pure
   {
     scopeStack.put(currentScope);
     currentScope = Scope(startLineNumber, type, openScope);
   }
-  void pushScope(Scope existingScope)
+  void pushScope(Scope existingScope) pure
   {
     scopeStack.put(currentScope);
     currentScope = existingScope;
   }
-  void popScope()
+  void popScope() pure
   {
     auto scopeStackLength = scopeStack.data.length;
     if(scopeStackLength == 0) {
@@ -334,7 +315,7 @@ struct ConstructProcessor
     throw new SemanticException(importLineNumber, &this, format("import '%s' not found", importName));
   }
 
-  void addSymbol(const(char)[] symbol, const(ISymbolObject) object)
+  void addSymbol(const(char)[] symbol, const(ISymbolObject) object) pure
   {
     Scope* addTo;
     if(currentScope.addSymbolsTo) {
@@ -346,13 +327,13 @@ struct ConstructProcessor
     auto entry = addTo.symbols.get(symbol, SymbolEntryList(null));
     if(!entry.first) {
       addTo.symbols[symbol] = SymbolEntryList(object.unconst);
-      logDebug("Added symbol '%s' to current scope", symbol);
+      pureLogDebug("Added symbol '%s' to current scope", symbol);
     } else {
       throw imp(format("multiple symbol objects with the same name (trying to add symbol '%s')", symbol));
     }
   }
 
-  void setSymbol(size_t setLineNumber, const(char)[] symbol, const(ISymbolObject) object)
+  void setSymbol(size_t setLineNumber, const(char)[] symbol, const(ISymbolObject) object) pure
   {
     auto scope_ = &currentScope;
     auto scopeIndex = scopeStack.data.length;
@@ -373,7 +354,7 @@ struct ConstructProcessor
       scope_ = &scopeStack.data[scopeIndex];
     }
   }
-  void letSetSymbol(const(char)[] symbol, const(ISymbolObject) object)
+  void letSetSymbol(const(char)[] symbol, const(ISymbolObject) object) pure
   {
     auto entry = currentScope.symbols.get(symbol, SymbolEntryList(null));
     if(entry.first) {
@@ -450,7 +431,7 @@ struct ConstructProcessor
   }
 
   
-  const(SymbolEntryList) tryLookupSymbol(const(char)[] fullSymbol) const
+  const(SymbolEntryList) tryLookupSymbol(const(char)[] fullSymbol) const pure
   {
     const(char)[] rest;
     auto symbol = fullSymbol.splitAtDot(&rest);
@@ -511,26 +492,28 @@ struct ConstructProcessor
   }
 
 
-  void printScopeStack()
+  void printScopeStack() pure
   {
     import std.stdio : writefln, stdout;
-    auto prefix = "";
-    size_t scopeNumber = 0;
-    foreach(scope_; scopeStack.data) {
-      writefln("%sScope %s (type=%s %s symbols)", prefix, scopeNumber, scope_.type, scope_.symbols.length);
+    debug {
+      auto prefix = "";
+      size_t scopeNumber = 0;
+      foreach(scope_; scopeStack.data) {
+        writefln("%sScope %s (type=%s %s symbols)", prefix, scopeNumber, scope_.type, scope_.symbols.length);
+        prefix ~= "  ";
+        foreach(symbol; scope_.symbols.byKeyValue) {
+          writefln("%s%s : %s", prefix, symbol.key, symbol.value);
+        }
+        prefix ~= "  ";
+        scopeNumber++;
+      }
+      writefln("%sScope %s (type=%s %s symbols)", prefix, scopeNumber, currentScope.type, currentScope.symbols.length);
       prefix ~= "  ";
-      foreach(symbol; scope_.symbols.byKeyValue) {
+      foreach(symbol; currentScope.symbols.byKeyValue) {
         writefln("%s%s : %s", prefix, symbol.key, symbol.value);
       }
-      prefix ~= "  ";
-      scopeNumber++;
+      stdout.flush();
     }
-    writefln("%sScope %s (type=%s %s symbols)", prefix, scopeNumber, currentScope.type, currentScope.symbols.length);
-    prefix ~= "  ";
-    foreach(symbol; currentScope.symbols.byKeyValue) {
-      writefln("%s%s : %s", prefix, symbol.key, symbol.value);
-    }
-    stdout.flush();
   }
 
 
@@ -542,7 +525,7 @@ struct ConstructProcessor
   {
     return new SemanticException(constructSymbol.lineNumber, &this, msg);
   }
-  auto endedInsideConstruct(const(ConstructSymbol) constructSymbol) const
+  auto endedInsideConstruct(const(ConstructSymbol) constructSymbol) const pure
   {
     if(currentScope.type == ScopeType.file) {
       return new SemanticException(constructSymbol.lineNumber, &this,
@@ -620,25 +603,22 @@ struct ConstructProcessor
 
   const(ConstructSymbol) consumeSymbol(const(ConstructSymbol) context, const(ConstructObject)[] objects, size_t* index)
   {
-    auto symbol = tryConsumeSymbol(context, objects, index);
+    auto symbol = tryConsumeSymbol(objects, index);
     if(!symbol) {
       throw semanticError(context.lineNumber, format
                           ("construct '%s' expected a symbol", context.value));
     }
     return symbol;
   }
-  const(ConstructSymbol) tryConsumeSymbol(const(ConstructSymbol) context, const(ConstructObject)[] objects, size_t* index)
+  const(ConstructSymbol) tryConsumeSymbol(const(ConstructObject)[] objects, size_t* index)
   {
     size_t nextIndex = *index;
     if(nextIndex >= objects.length) {
-      //throw endedInsideConstruct(context);
       return null;
     }
     auto object = objects[nextIndex++];
     auto symbol = object.asConstructSymbol;
     if(!symbol) {
-      //throw semanticError(context.lineNumber, format
-      //("construct '%s' expected a symbol but got %s", context.value, An(object.typeName)));
       return null;
     }
     
@@ -667,21 +647,9 @@ struct ConstructProcessor
     throw semanticError(symbol.lineNumber, format("The 'sym' keyword expects an expression that evaluates to a symbol or string but evaulated to %s", result.typeName));
   }
 
-  /*
-  inout(PatternNode) nextRequired(inout(PatternNode)[] nodes)
-  {
-    foreach(node; nodes) {
-      if(!node.countType.isOptional) {
-	return node;
-      }
-    }
-    return PatternNode.null_;
-  }
-  */
-
   bool matchPattern(const(ConstructSymbol) constructSymbol, Pattern pattern,
                     const(ConstructObject)[] objects, size_t* index,
-                    void delegate(const(ConstructObject) arg) appendArg)
+                    void delegate(const(ConstructObject) arg) pure appendArg)
   {
     
   PATTERN_NODE_LOOP:
@@ -711,7 +679,7 @@ struct ConstructProcessor
         if(node.countType != CountType.one) {
           throw imp(format("  matching symbol with count type %s", node.countType));
         }
-        auto symbol = tryConsumeSymbol(constructSymbol, objects, index);
+        auto symbol = tryConsumeSymbol(objects, index);
         if(symbol is null) {
           return false; // not a match
         }
@@ -757,27 +725,22 @@ struct ConstructProcessor
     }
     return true; // match
   }
-
   
-  const(ConstructObject) processConstruct(ConstructSymbol constructSymbol,
-      const(ConstructDefinition) con, const(ConstructObject)[] objects, size_t* index)
+  const(ConstructObject) processPatternConstruct(const(ConstructSymbol) constructSymbol, const(ConstructDefinition) con,
+                                                 const(PatternHandler)[] patternHandlers, const(ConstructObject)[] objects, size_t* index)
   {
-    if(con.patternHandlers.length == 0) {
-      return con.processNoPattern(&this, constructSymbol, objects, index);
-    }
-
     ConstructObject[256] constructArgs;
     size_t constructArgCount = 0;
     ConstructObject[256] constructObjectBuffer;
     size_t constructObjectOffset = 0;
 
-    void appendArg(const(ConstructObject) arg)
+    void appendArg(const(ConstructObject) arg) pure
     {
       constructArgs[constructArgCount++] = arg.unconst;
     }
 
     ConstructHandler handler = null;
-    foreach(patternHandlerIndex, patternHandler; con.patternHandlers) {
+    foreach(patternHandlerIndex, patternHandler; patternHandlers) {
       size_t nextIndex;
       nextIndex = *index;
       constructArgCount = 0;
@@ -803,30 +766,9 @@ struct ConstructProcessor
     }
     */
     
-    return handler(&this, constructSymbol, constructArgs[0..constructArgCount]);
+    return handler(&this, con, constructSymbol, constructArgs[0..constructArgCount]);
   }
 
-  
-
-  //
-  // Object consumeValue(Object[] objects, ref index)
-  // {
-  //   while(true) {
-  //     auto object = objects[index++];
-  //     if(object.isSymbol) {
-  //       auto symbolEntry = object.lookup();
-  //       if(symbolEntry.isEmpty) error "symbol does not exist";
-  //       if(symbolEntry.hasMulitipleObjects)
-  //         error "ambiguous symbol, multiple entries in the same scope";
-  //       object = symbolEntry.firstObject;
-  //       if(object.isConstructDefinition) {
-  //         return processConstruct(oject, ref index);
-  //       }
-  //     }
-  //     return object;
-  //   }
-  // }
-  //
   const(ConstructObject) consumeValue(const(ConstructSymbol) constructSymbol, const(ConstructObject)[] objects, size_t* index)
   {
     if(*index >= objects.length) {
@@ -854,7 +796,11 @@ struct ConstructProcessor
         }
 
         if(auto definition = symbolEntries.first.asConstructDefinition) {
-	  return processConstruct(symbol, definition, objects, index);
+          auto patternHandlers = definition.getPatternHandlers();
+          if(patternHandlers is null) {
+            return definition.processNoPattern(&this, symbol, objects, index);
+          }
+	  return processPatternConstruct(symbol, definition, patternHandlers, objects, index);
         }
 
         return symbolEntries.first.asOneConstructObject;
@@ -879,39 +825,6 @@ struct ConstructProcessor
     }
     return value;
   }
-
-  version(comment) {
-  const(T) resolveTo(T)(const(ConstructObject) obj)
-  {
-    if(auto value = obj.as!T) {
-      return value;
-    }
-    //logDebug("%s is not %s", obj.typeName, T.messageTypeName);
-
-    if(auto symbol = obj.asConstructSymbol) { 
-     if(auto symbolObject = lookupSymbol!T(symbol)) {
-	return symbolObject;
-      }
-      throw new SemanticException(obj.lineNumber, &this, format("symbol '%s' has not been bound", symbol.value));
-    }
-
-    throw imp(format("resolveTo!%s(%s)", T.staticTypeName, obj.typeName));
-    /*
-    static if( !is( T == Construct ) ) {
-      if(Construct construct = cast(Construct)obj) {
-	//logDebug("will attempt to convert construct '%s' to '%s'", construct.name, T.staticTypeName);
-	auto definition = state.tryFindConstruct(construct.name);
-	if(!definition) {
-	  throw new Exception(format("argument construct '%s' on line %s is not defined, if this construct is defined later, then this has not been implemented yet", construct.name, construct.lineNumber));
-	}
-	return evalTo!T(state, definition, construct);
-      }
-    }
-    
-    throw new SemanticException(obj.lineNumber, state, format("expected a(n) '%s' but got a(n) '%s'", T.staticTypeName, obj.typeName));
-    */
-  }
-  }  
 }
 
 unittest
@@ -937,6 +850,7 @@ unittest
   processor.popScope();
 
   testLookup(valueObj, "mysymbol");
+
   /*
   //
   // Test openScope
@@ -964,399 +878,60 @@ alias ProcessorFunc = const(ConstructObject) function(ConstructProcessor* proces
                                                       const(ConstructDefinition) definition,
                                                       const(ConstructSymbol) constructSymbol,
                                                       const(ConstructObject)[] objects, size_t* argIndex);
-
-class FunctionConstructDefinition : ConstructDefinition
+class FunctionConstructDefinition : NoPatternConstruct
 {
   ProcessorFunc func;
-  this(size_t lineNumber, const(char)[] filename,
-       ConstructAttributes attributes, ConstructType evalTo,
-       const(ConstructParam)[] requiredParams,
-       const(ConstructOptionalParam)[] optionalParams, ProcessorFunc func)
+  this(size_t lineNumber, string filename, ConstructAttributes attributes, immutable ConstructType evalTo, ProcessorFunc func) pure immutable
   {
-    super(lineNumber, filename, attributes,
-	  evalTo, requiredParams, optionalParams);
+    super(lineNumber, filename, attributes, evalTo);
     this.func = func;
   }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-						   const(ConstructObject)[] objects, size_t* argIndex) const
+  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol, const(ConstructObject)[] objects, size_t* index) const
   {
-    return func(processor, this, constructSymbol, objects, argIndex);
+    return func(processor, this, constructSymbol, objects, index);
   }
 }
+const(ConstructObject) handleConstructWithBlock
+(ConstructProcessor* processor, const(ConstructDefinition) definition, const(ConstructSymbol) constructSymbol, const(ConstructObject)[] args)
+{
+  auto withBlock = cast(ConstructWithBlockDefinition)definition;
+  auto pattern = withBlock.getPatternHandlers()[0].pattern;
 
-class ConstructWithBlockDefinition : ConstructDefinition
+  //logDev("pattern is '%s'", pattern);
+  if(args.length != pattern.nodes.length) {
+    throw new Exception(format("CodeBug: handleConstructWithBlock expected %s args for it's pattern, but got %s (%s)", pattern.nodes.length, args.length, pattern));
+  }
+
+  processor.pushScope(withBlock.block.lineNumber, ScopeType.defcon, true);
+  scope(exit) { processor.popScope(); }
+
+  foreach(i; 0..args.length) {
+    auto arg = args[i];
+    auto patternNode = pattern.nodes[i];
+
+    if(patternNode.name.length > 0 && patternNode.name != "nameless") {
+      processor.addSymbol(patternNode.name, arg);
+    }
+  }
+
+  return processor.processConstructImplementationBlock(withBlock.block.objects, withBlock);
+}
+class ConstructWithBlockDefinition : PatternConstructDefinition
 {
   const ConstructBlock block;
-  this(const Pattern pattern, size_t lineNumber, const(char)[] filename, ConstructAttributes attributes,
-       ConstructType evalTo, const(ConstructParam)[] requiredParams,
-       const(ConstructOptionalParam)[] optionalParams, const(ConstructBlock) block)
+  this(immutable Pattern pattern, size_t lineNumber, string filename, ConstructAttributes attributes,
+       immutable(ConstructType) evalTo, immutable(ConstructBlock) block) immutable pure
   {
-    super(lineNumber, filename, attributes,
-	  evalTo, requiredParams, optionalParams);
+    super([immutable PatternHandler(pattern, &handleConstructWithBlock)], lineNumber, filename, attributes, evalTo);
     this.block = block;
   }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-						   const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    //throw new Exception("ConstructWithBlockDefinition.processNoPattern deprecated");
-
-    logDebug("entering scope for construct '%s' defined on line %s",
-             constructSymbol.value, lineNumber);
-    processor.pushScope(lineNumber, ScopeType.defcon,
-                        cast(bool)(attributes & ConstructAttribute.openScope));
-    scope(exit) {processor.popScope();}
-
-    //
-    // Parse parameters
-    //
-    foreach(i, requiredParam; requiredParams) {
-      //if(argIndex >= objects.length) {
-      //throw processor.endedInsideConstruct(constructSymbol);
-      //}
-
-      //logDev("parsing parameter %s '%s'...", i, requiredParam.name);
-      if(requiredParam.type) {
-        ConstructObject arg;
-        if(requiredParam.type.asPrimitive == PrimitiveTypeEnum.symbol) {
-          //logDev("getting arg as symbol...");
-          arg = processor.consumeSymbol(constructSymbol, objects, argIndex).unconst;
-        } else if(requiredParam.type.asPrimitive == PrimitiveTypeEnum.symbol) {
-          //logDev("getting arg as block...");
-          arg = processor.consumeTypedValue!ConstructBlock(constructSymbol, objects, argIndex).unconst;
-        } else {
-          arg = processor.consumeValue(constructSymbol, objects, argIndex).unconst;
-          if(arg is null) {
-            throw processor.constructError(constructSymbol, format
-                                           ("expected %s for argument %s but got void",
-                                            An(to!string(requiredParam.type.asPrimitive)), i));
-          }
-        }
-        
-	if(!arg.canBe(requiredParam.type)) {
-	  throw processor.semanticError(arg.lineNumber, format
-					("Expected argument %s to be %s, but is %s", (i+1),
-					 An(requiredParam.type.typeName), An(arg.typeName)));
-	}
-	processor.addSymbol(requiredParam.name, arg);
-      } else {
-        auto object = processor.consumeValue(constructSymbol, objects, argIndex);
-	processor.addSymbol(requiredParam.name, object);
-      }
-    }
-    return processor.processConstructImplementationBlock(block.objects, this);
-
-  }
-
 }
 
-
-
-
-
-struct FuncAndPattern {
-  string funcName;
-  Pattern pattern;
-
-  string genFunc() const pure
-  {
-    //writefln("argNames = %s", argNames);
-
-    StringBuilder!512 builder;
-
-    builder.append("const(ConstructObject) ");
-    builder.append(funcName);
-    builder.append("(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol");
-  
-    foreach(node; pattern.nodes) {
-      string typeName = null;
-      if(node.countType == CountType.optional) {
-	typeName = node.matcher.processorOptionalValueType;
-      } else {
-	typeName = node.matcher.processorValueType;
-      }
-    
-      if(typeName) {
-	builder.append(", const(");
-	builder.append(typeName);
-	if(!node.countType.onlyOne) {
-	  builder.append(")[] ");
-	} else {
-	  builder.append(") ");
-	}
-        builder.append(node.name);
-      }
-    }
-    builder.append(")");
-    return builder.createString();
-  }
-}
-string genConstructPatternThunk(string name, const FuncAndPattern patternFunc) pure
-{
-  StringBuilder!1024 builder;
-
-  builder.append("const(ConstructObject) ");
-  builder.append(name);
-  builder.append("(ConstructProcessor* processor");
-  builder.append(", const(ConstructSymbol) constructSymbol");
-  builder.append(", const(ConstructObject)[] args)\n");
-  builder.append("{\n");
-  
-  builder.append("  assert(args.length == ");
-  auto assertCountOffset = builder.offset;
-  builder.append("            );\n");
-
-  builder.append("  return ");
-  builder.append(patternFunc.funcName);
-  builder.append("(processor, constructSymbol");
-  
-  size_t argIndex = 0;
-  foreach(node; patternFunc.pattern.nodes) {
-    string typeName = null;
-    if(node.countType == CountType.optional) {
-      typeName = node.matcher.processorOptionalValueType;
-    } else {
-      typeName = node.matcher.processorValueType;
-    }
-
-    if(typeName) {
-      formattedWrite(&builder.append, ",\n    args[%s] ? args[%s].as!%s : null", argIndex, argIndex, typeName);
-      argIndex++;
-    }
-  }
-
-  builder.append(");\n");
-  builder.append("}\n");
-  auto codeSize = builder.offset;
-  builder.offset = assertCountOffset;
-  formattedWrite(&builder.append, "%s", argIndex);
-  builder.offset = codeSize;
-  
-  return builder.createString();
-}
-
-immutable importFunc = immutable FuncAndPattern("handleImport", importPattern);
-mixin(importFunc.genFunc()~q{
-{
-  processor.findAndImport(constructSymbol.lineNumber, name.toUtf8);
-  //foreach(name; names) {
-  //processor.findAndImport(constructSymbol.lineNumber, name.toUtf8);
-  //}
-  return null;
-}});
-mixin(genConstructPatternThunk("importThunk", importFunc));
-immutable importConstructDefinition = new immutable InternalImplementedConstruct
-  ([immutable PatternHandler(importPattern, &importThunk)], ConstructAttributes.init, null);
-   
-/*
-class ImportConstructDefinition : ConstructDefinition
-{
-  this()
-  {
-    super(0, null, ConstructAttributes.init, null, null, null);
-  }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-						   const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    while(true) {
-      auto object = processor.consumeValue(constructSymbol, objects, argIndex);
-      if(object.isObjectBreak) {
-        break;
-      } else if(auto string_ = object.asConstructString) {
-        processor.findAndImport(constructSymbol.lineNumber, string_.toUtf8());
-      } else {
-        throw processor.semanticError(constructSymbol.lineNumber, format
-                                      ("the import construct expects a string but got %s",
-                                       An(object.typeName)));
-      }
-    }
-    return null;
-  }
-}
-*/
-
-
-const(ConstructParam)[] parseRequiredParams(ConstructProcessor* processor, const(ConstructList) list)
-{
-  auto params = appender!(const(ConstructParam)[])();
-  for(size_t itemIndex = 0;;) {
-    if(itemIndex >= list.items.length) {
-      return params.data;
-    }
-
-    auto paramName = list.items[itemIndex].asConstructSymbol;
-    if(!paramName) {
-      throw processor.semanticError(list.items[itemIndex].lineNumber, format
-				    ("expected defcon parameter name to be a symbol but got %s",
-				     An(list.items[itemIndex].typeName)));
-    }
-    itemIndex++;
-    if(itemIndex >= list.items.length) {
-      params.put(ConstructParam(paramName.value));
-      break;
-    }
-
-    ConstructType paramType;
-    {
-      auto object = processor.consumeValueAlreadyCheckedIndex(list.items, &itemIndex);
-      if(object is null) {
-	throw processor.semanticError(list.items[itemIndex].lineNumber,
-				      "expected the expression to return a type but returned null");
-      }
-      if(object.isListBreak) {
-	params.put(ConstructParam(paramName.value));
-	continue;
-      }
-      paramType = object.asConstructType.unconst;
-      if(paramType is null) {
-	throw processor.semanticError(list.items[itemIndex].lineNumber, format
-				      ("expected the expression to return a type but returned %s",
-				       An(object.typeName)));
-      }
-    }
-
-    if(itemIndex >= list.items.length) {
-      params.put(ConstructParam(paramName.value, paramType));
-      break;
-    }
-    if(list.items[itemIndex].isListBreak) {
-      params.put(ConstructParam(paramName.value, paramType));
-      itemIndex++;
-      continue;
-    }
-
-    imp("a third value for a defcon parameter");
-  }
-
-  return params.data;
-}
-
-
-
-immutable defconFunc1 = immutable FuncAndPattern("handleDefcon1", defconPattern1);
-mixin(defconFunc1.genFunc()~q{
-{
-  ConstructAttributes attributes;
-  const(ConstructParam)[] requiredParams = parseRequiredParams(processor, pattern);
-  /*
-  auto nodes = new PatternNode[requiredParams.length];
-  foreach(i, param; requiredParams) {
-    nodes[i] = PatternNode(null, CountType.one, param.type.matcher);
-  }
-  */
-  auto backendFunc = loadConstructBackend(name.value);
-  if(backendFunc == null) {
-    throw processor.semanticError(name.lineNumber, format
-                                  ("the backend does not implement construct '%s'", name));
-  }
-  processor.addSymbol(name.value, new FunctionConstructDefinition
-                      (/*Pattern(nodes), */constructSymbol.lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, backendFunc));
-  return null;
-}});
-
-immutable defconFunc2 = immutable FuncAndPattern("handleDefcon2", defconPattern2);
-mixin(defconFunc2.genFunc()~q{
-{
-  ConstructAttributes attributes;
-  const(ConstructParam)[] requiredParams = parseRequiredParams(processor, pattern);
-  auto nodes = new PatternNode[requiredParams.length];
-  foreach(i, param; requiredParams) {
-    if(param.type is null) {
-      nodes[i] = PatternNode(null, CountType.one, Matcher.anything);
-    } else {
-      nodes[i] = PatternNode(null, CountType.one, param.type.matcher);
-    }
-  }
-  
-  processor.addSymbol(name.value, new ConstructWithBlockDefinition
-                      (Pattern(nodes), constructSymbol.lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, implementation));
-  return null;
-}});
-
-mixin(genConstructPatternThunk("defconThunk1", defconFunc1));
-mixin(genConstructPatternThunk("defconThunk2", defconFunc2));
-immutable defconConstructDefinition = new immutable InternalImplementedConstruct
-  ([immutable PatternHandler(defconPattern1, &defconThunk1),
-    immutable PatternHandler(defconPattern2, &defconThunk2)],
-   ConstructAttributes.init, null);
-/*
-class DefconConstructDefinition : ConstructDefinition
-{
-  this() { super(defconPattern, 0, null, ConstructAttributes.init, null, null, null); this.handler = &defconThunk; }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-						   const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    auto constructName = processor.consumeSymbol(constructSymbol, objects, argIndex).value;
-
-    ConstructBlock implementation = null;
-    ConstructAttributes attributes;
-
-    const(ConstructParam)[] requiredParams = null;
-
-    //
-    // Parse defcon information
-    //
-    while(true) {
-      auto object = processor.consumeValue(constructSymbol, objects, argIndex);
-      if(object.isObjectBreak) {
-        break;
-      } else if(auto block = object.asConstructBlock) {
-	implementation = block.unconst;
-	break;
-      } else if(auto list = object.asConstructList) {
-	if(requiredParams == null) {
-	  requiredParams = parseRequiredParams(processor, list);
-	} else {
-	  imp("defcon construct optional param list");
-	}
-      } else if(auto named = object.asNamedObject) {
-	imp("defcon named objects");
-      } else {
-        imp(format("defcon construct type %s", object.typeName));
-      }
-    }
-
-    //
-    // Create the construct definition
-    //
-    if(implementation) {
-      processor.addSymbol(constructName, new ConstructWithBlockDefinition
-                          (lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, implementation));
-    } else {
-      auto backendFunc = loadConstructBackend(constructName);
-      if(backendFunc == null) {
-        throw processor.semanticError(lineNumber, format
-                                      ("the backend does not implement construct '%s'", constructName));
-      }
-      processor.addSymbol(constructName, new FunctionConstructDefinition
-                          (lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, backendFunc));
-    }
-    return null;
-  }
-}
-*/
-
-
-immutable toSymbolFunc1 = immutable FuncAndPattern("handleToSymbol1", oneSymbolPattern);
-mixin(toSymbolFunc1.genFunc()~q{
-{
-  return symbol;
-}});
-immutable toSymbolFunc2 = immutable FuncAndPattern("handleToSymbol2", oneStringPattern);
-mixin(toSymbolFunc2.genFunc()~q{
-{
-  return new ConstructSymbol(string_.lineNumber, string_.toUtf8());
-}});
-
-mixin(genConstructPatternThunk("toSymbolThunk1", toSymbolFunc1));
-mixin(genConstructPatternThunk("toSymbolThunk2", toSymbolFunc2));
-immutable toSymbolConstructDefinition = new immutable InternalImplementedConstruct
-  ([immutable PatternHandler(oneSymbolPattern, &toSymbolThunk1),
-    immutable PatternHandler(oneStringPattern, &toSymbolThunk2)],
-   ConstructAttributes.init, null);
-
+/+
 class DeftypeConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
 						   const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1382,44 +957,9 @@ class DeftypeConstructDefinition : ConstructDefinition
     processor.addSymbol(typeName, new TypeDefinition(lineNumber, typeName, type));
     return null;
   }
+  */
 }
 
-
-
-immutable patternConstructPattern = immutable Pattern
-  ([immutable PatternNode("patternList", CountType.one, Matcher.list)]);
-immutable patternFunc = immutable FuncAndPattern("handlePattern", patternConstructPattern);
-mixin(patternFunc.genFunc()~q{
-{
-  return new ConstructPattern(patternList.lineNumber, processPattern(processor, patternList));
-}});
-mixin(genConstructPatternThunk("patternThunk", patternFunc));
-immutable patternConstructDefinition = new immutable InternalImplementedConstruct
-  ([immutable PatternHandler(patternConstructPattern, &patternThunk)], ConstructAttributes.init, null);
-   
-
-class AddSymbolsToCallerConstructDefinition : ConstructDefinition
-{
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    auto code = processor.consumeTypedValue!ConstructBlock(constructSymbol, objects, argIndex);
-
-    Scope* addSymbolsTo;
-    if(processor.currentScope.type == ScopeType.defcon) {
-      addSymbolsTo = &processor.scopeStack.data[processor.scopeStack.data.length-1];
-    } else {
-      throw imp("non root level addSymbolsToCaller");
-    }
-
-    processor.pushScope(code.lineNumber, ScopeType.block, true);
-    scope(exit) { processor.popScope(); }
-    processor.currentScope.addSymbolsTo = addSymbolsTo;
-
-    return processor.processBlock(code.objects);
-  }
-}
 /*
 class CallerScopeConstructDefinition : ConstructDefinition
 {
@@ -1443,6 +983,7 @@ class CallerScopeConstructDefinition : ConstructDefinition
   }
 }
 */
+  /*
 class ExecConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
@@ -1453,6 +994,8 @@ class ExecConstructDefinition : ConstructDefinition
     return processor.processBlock(code.objects);
   }
 }
+  */
+  /*
 class ThrowConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
@@ -1463,187 +1006,25 @@ class ThrowConstructDefinition : ConstructDefinition
     throw new ConstructThrownException(constructSymbol.lineNumber, processor, cast(string)message.toUtf8());
   }
 }
-class TryConstructDefinition : ConstructDefinition
-{
-  this() { super(/*tryPattern, */0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    auto code = processor.consumeTypedValue!ConstructBlock(constructSymbol, objects, argIndex);
+  */
 
 
-    ConstructSymbol catchSymbol = null;
-    ConstructBlock catchBlock = null;
-    ConstructBlock finallyBlock = null;
-
-    while(*argIndex < objects.length)
-    {
-      auto nextObject = objects[*argIndex];
-      if(auto symbol = nextObject.asConstructSymbol) {
-	if(symbol.value == "catch") {
-          if(catchBlock) {
-            throw imp("multiple catch blocks");
-          }
-          (*argIndex)++;
-          catchSymbol = processor.consumeSymbol(constructSymbol, objects, argIndex).unconst;
-	  catchBlock = processor.consumeTypedValue!ConstructBlock(constructSymbol, objects, argIndex).unconst;
-          continue;
-	}
-
-        if(symbol.value == "finally") {
-	  throw imp("try-finally");
-	}
-      }
-      break;
-    }
-
-    try {
-      return processor.processBlock(code.objects);
-    } catch(ConstructException e) {
-      processor.pushScope(catchBlock.lineNumber, ScopeType.block, true);
-      scope(exit) { processor.popScope(); }
-
-      if(catchSymbol) {
-	processor.addSymbol(catchSymbol.value, new ConstructUtf8(0, e.msg));
-      }
-      return processor.processBlock(catchBlock.objects);
-    }
-  }
-}
-
-
-immutable letFunc = immutable FuncAndPattern("handleLet", setletPattern);
-mixin(letFunc.genFunc()~q{
-{
-  processor.addSymbol(name.value, value);
-  return (break_ is null) ? value : null;
-}});
-//pragma(msg, genConstructPatternThunk("letThunk2", letFunc));
-mixin(genConstructPatternThunk("letThunk", letFunc));
-immutable letConstructDefinition = new immutable InternalImplementedConstruct
-  ([immutable PatternHandler(setletPattern, &letThunk)], ConstructAttributes.init, null);
-/*
-class LetConstructDefinition : ConstructDefinition
-{
-  this() { super(letPattern, 0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    auto symbol = processor.consumeSymbol(constructSymbol, objects, argIndex).value;
-    auto value = processor.consumeValue(constructSymbol, objects, argIndex);
-    if(value is null) {
-      throw processor.semanticError(constructSymbol.lineNumber, "let construct does not work if the source expression evaluates to null");
-    }
-    processor.addSymbol(symbol, value);
-
-    if(*argIndex < objects.length) {
-      if(objects[*argIndex].isObjectBreak) {
-        (*argIndex)++;
-        return null;
-      }
-    }
-    return value;
-  }
-}
-*/
-
-immutable setFunc = immutable FuncAndPattern("handleSet", setletPattern);
-mixin(setFunc.genFunc()~q{
-{
-  processor.setSymbol(name.lineNumber, name.value, value);
-  return (break_ is null) ? value : null;
-}});
-//pragma(msg, genConstructPatternThunk("setThunk2", setFunc));
-mixin(genConstructPatternThunk("setThunk", setFunc));
-immutable setConstructDefinition = new immutable InternalImplementedConstruct
-  ([immutable PatternHandler(setletPattern, &setThunk)], ConstructAttributes.init, null);
-
-
-immutable letSetFunc = immutable FuncAndPattern("handleLetSet", setletPattern);
-mixin(letSetFunc.genFunc()~q{
-{
-  processor.letSetSymbol(name.value, value);
-  return (break_ is null) ? value : null;
-}});
-mixin(genConstructPatternThunk("letSetThunk", letSetFunc));
-immutable letSetConstructDefinition = new immutable InternalImplementedConstruct
-  ([immutable PatternHandler(setletPattern, &letSetThunk)], ConstructAttributes.init, null);
-/*
-class LetSetConstructDefinition : ConstructDefinition
-{
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    auto symbol = processor.consumeSymbol(constructSymbol, objects, argIndex).value;
-    auto value = processor.consumeValue(constructSymbol, objects, argIndex);
-    if(value is null) {
-      throw processor.semanticError(constructSymbol.lineNumber, "let construct does not work if the source expression evaluates to null");
-    }
-    processor.letSetSymbol(symbol, value);
-
-    if(*argIndex < objects.length) {
-      if(objects[*argIndex].isObjectBreak) {
-        (*argIndex)++;
-        return null;
-      }
-    }
-    return value;
-  }
-}
-*/
-
-class IfConstructDefinition : ConstructDefinition
-{
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    auto condition = processor.consumeTypedValue!ConstructBool(constructSymbol, objects, argIndex);
-    auto trueCase = processor.consumeTypedValue!ConstructBlock(constructSymbol, objects, argIndex);
-    ConstructObject resultObject = null;
-    if(condition.value) {
-      processor.pushScope(trueCase.lineNumber, ScopeType.block, true);
-      scope(exit) { processor.popScope(); }
-      return processor.processBlock(trueCase.objects).unconst;
-    } else {
-      return null;
-    }
-  }
-}
-
-
-class EqualsConstructDefinition : ConstructDefinition
-{
-  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.bool_), null, null); }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    auto left  = processor.consumeValue(constructSymbol, objects, argIndex);
-    if(left is null) {
-      throw processor.constructError(constructSymbol, "the equals construct did not get a value for the left expression");
-    }
-    auto right = processor.consumeValue(constructSymbol, objects, argIndex);
-    if(right is null) {
-      throw processor.constructError(constructSymbol, "the equals construct did not get a value for the right expression");
-    }
-    auto result = left.equals(right, false);
-    return new ConstructBool(constructSymbol.lineNumber,  result);
-  }
-}
 class ListOfConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.list), null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto type = processor.consumeTypedValue!ConstructType(constructSymbol, objects, argIndex);
     return new ConstructTypedListType(constructSymbol.lineNumber, type);
   }
+  */
 }
 class TypeOfConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.type), null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1653,10 +1034,12 @@ class TypeOfConstructDefinition : ConstructDefinition
     }
     return new PrimitiveType(0, object.primitiveType);
   }
+  */
 }
 class ItemTypeConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.type), null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1664,10 +1047,12 @@ class ItemTypeConstructDefinition : ConstructDefinition
     //logDev("list type is %s", object.itemType);
     return new PrimitiveType(0, object.itemType);
   }
+  */
 }
 class TypedConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1675,114 +1060,24 @@ class TypedConstructDefinition : ConstructDefinition
     auto value = processor.consumeValue(constructSymbol, objects, argIndex);
     return value.typedAs(type);
   }
-}
-class ForEachConstructDefinition : ConstructDefinition
-{
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    auto forEachArgs = processor.consumeTypedValue!ConstructList(constructSymbol, objects, argIndex);
-    auto forEachCode = processor.consumeTypedValue!ConstructBlock(constructSymbol, objects, argIndex);
-
-    //
-    // Parse the foreach iteration list
-    //
-    const(char)[] indexVar = null;
-    const(char)[] itemVar;
-    ConstructList list;
-
-    {
-      size_t listIndex = 0;
-      if(listIndex >= forEachArgs.items.length) {
-        throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list is incomplete");
-      }
-      itemVar = processor.consumeSymbol(constructSymbol, forEachArgs.items, &listIndex).value;
-
-      if(listIndex >= forEachArgs.items.length) {
-        throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list is incomplete");
-      }
-      auto next = forEachArgs.items[listIndex++].unconst;
-      if(next.isListBreak) {
-        indexVar = itemVar;
-        itemVar = processor.consumeSymbol(constructSymbol, forEachArgs.items, &listIndex).value;
-        if(listIndex >= forEachArgs.items.length) {
-          throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list is incomplete");
-        }
-        next = forEachArgs.items[listIndex++].unconst;
-      }
-
-      if(auto inSymbol = next.asConstructSymbol) {
-      } else {
-        throw processor.semanticError(constructSymbol.lineNumber, format
-                                      ("foreach expected an 'in' symbol but got %s: %s",
-                                       An(next.typeName), next));
-      }
-
-      if(listIndex >= forEachArgs.items.length) {
-        throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list is incomplete");
-      }
-      auto object = processor.consumeValueAlreadyCheckedIndex(forEachArgs.items, &listIndex);
-      if(object is null) {
-        throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list got a void expression");
-      }
-      if(listIndex < forEachArgs.items.length) {
-        throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list has too many items");
-      }
-
-      list = object.asConstructList.unconst;
-      if(!list) {
-        throw processor.semanticError(constructSymbol.lineNumber, format
-                                      ("foreach requires a list but got %s", An(object.typeName)));
-      }
-    }
-    
-    if(list.items.length > 0) {
-      processor.pushScope(forEachCode.lineNumber, ScopeType.block, true);
-      ConstructUint indexObject = null;
-      scope(exit) { processor.popScope(); }
-      if(indexVar) {
-        indexObject = new ConstructUint(forEachArgs.lineNumber, 0);
-        processor.addSymbol(indexVar, indexObject);
-      }
-      processor.addSymbol(itemVar, list.items[0]);
-      
-      auto firstResult = processor.processBlock(forEachCode.objects);
-      if(firstResult) {
-	if(auto return_ = firstResult.asConstructReturn) {
-	  return firstResult;
-	}
-      }
-      foreach(listObject; list.items[1..$]) {
-        processor.setSymbol(constructSymbol.lineNumber, itemVar, listObject);
-        if(indexObject) {
-          indexObject.value++;
-        }
-        auto result = processor.processBlock(forEachCode.objects);
-	if(result) {
-	  if(auto return_ = result.asConstructReturn) {
-	    return result;
-	  }
-	}
-      }
-    }
-
-    return null;
-  }
+  */
 }
 class MallocConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     auto length = processor.consumeTypedValue!ConstructUint(constructSymbol, objects, argIndex);
     return new ConstructPointer(constructSymbol.lineNumber, malloc(length.value));
   }
+  */
 }
 class StringByteLengthConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.uint_), null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1790,6 +1085,7 @@ class StringByteLengthConstructDefinition : ConstructDefinition
     auto type = processor.consumeTypedValue!ConstructType(constructSymbol, objects, argIndex).unconst;
     return new ConstructUint(0, stringValue.stringByteLength(type.asPrimitive));
   }
+  */
 }
 /*
 class StringAllocConstructDefinition : ConstructDefinition
@@ -1821,6 +1117,7 @@ class StringAllocConstructDefinition : ConstructDefinition
 class StrcpyConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1830,35 +1127,23 @@ class StrcpyConstructDefinition : ConstructDefinition
     
     throw imp("strcpy");
   }
+  */
 }
 class MemcpyConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     throw imp("memcpy");
   }
-}
-class NotConstructDefinition : ConstructDefinition
-{
-  this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.bool_), null, null); }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    auto object = processor.consumeValue(constructSymbol, objects, argIndex);
-    if(object is null) {
-      throw processor.semanticError(constructSymbol.lineNumber, "the not construct expects an expression that returns a bool but it returned nothing");
-    }
-    auto bool_ = object.asConstructBool;
-    if(!bool_) {
-      throw processor.semanticError(constructSymbol.lineNumber, format("the add construct expects an expression that returns a bool but it returned %s", object.typeName));    }
-    return new ConstructBool(0, !bool_.value);
-  }
+  */
 }
 class AddConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1866,10 +1151,12 @@ class AddConstructDefinition : ConstructDefinition
     auto rightNumber = processor.consumeTypedValue!ConstructNumber(constructSymbol, objects, argIndex);
     return leftNumber.add(rightNumber);
   }
+  */
 }
 class ReturnConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.anything), null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
@@ -1881,15 +1168,18 @@ class ReturnConstructDefinition : ConstructDefinition
     }
     return new ConstructReturn(constructSymbol.lineNumber, returnValue);
   }
+  */
 }
 class StructConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     throw imp("struct construct");
   }
+  */
 }
 
 
@@ -1897,30 +1187,37 @@ class StructConstructDefinition : ConstructDefinition
 class DefclassConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     throw imp("defclass");
   }
+  */
 }
 
 
 class SemanticsConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     throw imp("semantics construct");
   }
+  */
 }
 class DumpScopeStackConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, null, null, null); }
+  /*
   final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
                                                 const(ConstructObject)[] objects, size_t* argIndex) const
   {
     processor.printScopeStack();
     return null;
   }
+  */
 }
++/

@@ -9,7 +9,9 @@ static import construct.standardParser;
 class ConstructParseException : Exception
 {
   size_t constructLineNumber;
-  this(size_t constructLineNumber, string msg, string codeFile = __FILE__, size_t codeLine = __LINE__) {
+  this(size_t constructLineNumber, string msg, string codeFile = __FILE__,
+       size_t codeLine = __LINE__) pure
+  {
     super(msg, codeFile, codeLine);
     this.constructLineNumber = constructLineNumber;
   }
@@ -22,7 +24,7 @@ struct SourceFile
 
 struct ConstructParser {
   string name;
-  const(ConstructObject)[] function(const(char)[] code) func;
+  const(ConstructObject)[] function(const(char)[] code) pure func;
 }
 
 template standardParser(T) {
