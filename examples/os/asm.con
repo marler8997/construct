@@ -1,0 +1,15 @@
+
+
+defclass Instruction
+{
+    
+}
+defclass MovInstruction : Instruction
+{
+}
+
+
+defcon mov (reg symbol, value number)
+{
+  message "emit mov " reg " " value;
+}

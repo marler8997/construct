@@ -11,8 +11,7 @@ import "util"
 defcon each(items list, itemSymbol symbol, code constructBlock)
 {
   foreach(item in items) {
-    //letset resolveSymbolRef itemSymbol item;
-    letset resolveSymbolRef itemSymbol item;
+    letset sym itemSymbol item;
     exec code
   }
 }
@@ -22,21 +21,27 @@ each (1 2 3) item { message "Item is: " item; }
 message "Using the 'each' construct with numbers and strings:";
 each(1 "hello" 2 "again" 3) item { message "Item is: " item; }
 
+
+assert equals 2 add 1 1
+
 // TODO: joins the given strings
 defcon join(strings listOf string) //returns=strings.type
 {
   let totalLength 0;
   foreach(string_ in strings) {
-    set totalLength add totalLength stringByteLength string_ itemType strings;
+    set totalLength add totalLength
+      stringByteLength string_ itemType strings;
   }
   message "total string byte length is: " totalLength;
 
   let joined malloc totalLength;
-  let dest joined;
-  foreach(string_ in strings) {
-    strcpy dest string_ itemType strings;
-    // todo: put this in an ifContinue block
-    set dest add dest string_.length
+  {
+    let dest joined;
+    foreach(string_ in strings) {
+      strcpy dest string_ itemType strings
+      // todo: put this in an ifContinue block
+      set dest add dest string_.length
+    }
   }
   
   return joined;

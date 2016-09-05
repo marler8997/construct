@@ -6,14 +6,17 @@ import std.file   : mkdir, exists;
 import std.path   : dirName, setExtension, baseName, buildNormalizedPath;
 import std.conv   : to;
 
-import construct.ir;
-import construct.processor : ConstructProcessor, ProcessResult, ProcessorFunc,
-                             ConstructDefinition, FunctionConstructDefinition, logDev;
+import construct.util;
+import construct.parserCore;
+import construct.backendCore : ConstructType, PrimitiveType, ConstructDefinition, ConstructAttributes,
+                               PrimitiveTypeEnum;
+import construct.processor : ConstructProcessor, ProcessorFunc,
+                             FunctionConstructDefinition, logDev;
 
 void loadBackendConstructs(ConstructProcessor* processor) pure
 {
   processor.addSymbol("message", new immutable FunctionConstructDefinition
-                      (0, cast(string)processor.currentFile.name, ConstructAttributes.init, null, &messageHandler));
+                      ("message", 0, cast(string)processor.currentFile.name, ConstructAttributes.init, null, &messageHandler));
 }
 ProcessorFunc loadConstructBackend(const(char)[] name) pure
 {
@@ -26,7 +29,7 @@ ProcessorFunc loadConstructBackend(const(char)[] name) pure
   }
   return null;
 }
-ConstructType loadBackendType(const(char)[] name) pure
+ConstructType loadBackendType(const(char)[] name)
 {
   if(name == "string") {
     return singleton!PrimitiveType(0, PrimitiveTypeEnum.utf8);
@@ -47,19 +50,19 @@ const(ConstructObject) messageHandler(ConstructProcessor* processor,
   // wrap in debug to retain purity
   debug {
     while(true) {
-      auto object = processor.consumeValue(constructSymbol, objects, argIndex);
+      auto object = processor.consumeValue(definition, constructSymbol, objects, argIndex);
       if(object is null) {
         throw processor.semanticError(constructSymbol.lineNumber, "the message construct does not handle void statements");
       }
       if(object.isObjectBreak) {
         break;
-      } else if(auto string_ = object.asConstructString) {
+      } else if(auto string_ = object.tryAsConstructString) {
         write(string_.toUtf8());
-      } else if(auto number = object.asConstructUint) {
+      } else if(auto number = object.tryAsConstructUint) {
         writef("%s", number.value);
-      } else if(auto bool_ = object.asConstructBool) {
+      } else if(auto bool_ = object.tryAsConstructBool) {
         write(bool_.value ? "true" : "false");
-      } else if(auto symbol = object.asConstructSymbol) {
+      } else if(auto symbol = object.tryAsConstructSymbol) {
         write("symbol:");
         write(symbol.value);
       } else {

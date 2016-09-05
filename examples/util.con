@@ -26,7 +26,7 @@ defcon expectFail (code constructBlock)
     message "Caught expected error: " error;
     set thrownError error;
   }
-  if equals thrownError null {
+  if thrownError == null {
     throw "expected failure but did not get it";
   }
 }
@@ -34,6 +34,11 @@ defcon expectFail (code constructBlock)
 expectFail
 {
   throw "expectFail should catch this";
+}
+
+expectFail
+{
+  assert false // expectFail should catch this assert
 }
 
 expectFail { expectFail; }

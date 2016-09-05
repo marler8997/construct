@@ -34,12 +34,12 @@ struct ConsolasFont
   //               |  |   /  \   | |- charLineHeight
   // charBoxHeight |  |  /____\  | |
   //               |  | /      \ | |
-  //               |  |/________\| - 
+  //               |  |/________\| -
   //               |  |          |
   //               -  |----------|
   //
   //
-  
+
   float size;
   float charBoxWidth;
   float charLineHeight;
@@ -105,7 +105,7 @@ void renderFontSizeTest(File file, ConsolasFont font, bool renderAllRows = true)
       x += font.charBoxWidth*2;
     }
   }
-  
+
   size_t y = originOffset;
   file.writefln(`<rect x="%s" y="%s" width="%s" height="1" style="fill:%s"/>`,
                 originOffset, y+font.charLineHeight, testText.length*font.charBoxWidth, underlineColor);
@@ -185,7 +185,7 @@ struct SvgPatternSettings
   size_t nodeCornerRadius;
   size_t terminalRadius;
   size_t curveRadius;
-  
+
   size_t roadPadding;
   size_t roadMargin;
 
@@ -270,13 +270,13 @@ class SvgSubPatternNode : SvgNode
     return settings.groupBoxMargin;
   }
   override inout(SvgSubPatternNode) tryAsSubPattern() inout { return this; }
-  
+
   this(CountType countType, const(char)[] title, const(SvgPatternSettings)* settings, const(PatternNode)[] nodes)
   {
     assert(nodes.length > 0);
-    
+
     this.title = title;
-    
+
     subNodes = new SvgNode[nodes.length];
     scope creator = new SvgNodeCreator(subNodes, settings);
     foreach(nodeIndex, node; nodes) {
@@ -312,7 +312,7 @@ class SvgSubPatternNode : SvgNode
 		  x+leftWidth, railStartY, x+leftWidth, y, settings.lineWidth);
 
     y = renderNodes(file, settings, subNodes, x + leftWidth, y);
-    
+
     file.writefln(`  <line x1="%s" y1="%s" x2="%s" y2="%s" style="stroke:black;stroke-width:%s" />`,
 		  x+leftWidth, y, x+leftWidth, y + settings.nodePadding, settings.lineWidth);
     y += settings.nodePadding;
@@ -341,15 +341,15 @@ void renderRail(File file, const(SvgPatternSettings)* settings, ptrdiff_t drainX
                 drainX          , yTop + topYOffsetAtDrain,
                 drainX          , yTop,
                 drainX + xRadius, yTop,
-                
+
                 railX  - xRadius, yTop,
                 railX           , yTop,
                 railX           , yTop + settings.curveRadius,
-                
+
                 railX           , yBottom - settings.curveRadius,
                 railX           , yBottom,
                 railX - xRadius , yBottom,
-                
+
                 drainX + xRadius, yBottom,
                 drainX          , yBottom,
                 drainX          , yBottom + bottomYOffsetAtDrain,
@@ -364,7 +364,7 @@ struct RailBounds
 RailBounds measureBounds(const(SvgPatternSettings)* settings, const(SvgNode)[] svgNodes)
 {
   RailBounds bounds;
-  
+
   foreach(nodeIndex, svgNode; svgNodes) {
     size_t svgNodeTotalLeftWidth  = svgNode.leftWidth + svgNode.margin(settings);
     size_t svgNodeTotalRightWidth = svgNode.rightWidth + svgNode.margin(settings);
@@ -374,7 +374,7 @@ RailBounds measureBounds(const(SvgPatternSettings)* settings, const(SvgNode)[] s
     if(nodeIndex > 0) {
       bounds.height += 2*settings.railMarginY;
     }
-      
+
     if(nodeIndex > 0) {
       // right side: previous node's loop rail start
       if(svgNodes[nodeIndex-1].countType.isLoop) {
@@ -395,7 +395,7 @@ RailBounds measureBounds(const(SvgPatternSettings)* settings, const(SvgNode)[] s
       bounds.height += settings.curveRadius*2;
       svgNodeTotalRightWidth += settings.roadPadding + settings.roadMargin;
     }
-    
+
     if(svgNodeTotalLeftWidth > bounds.left) {
       bounds.left = svgNodeTotalLeftWidth;
     }
@@ -408,7 +408,7 @@ RailBounds measureBounds(const(SvgPatternSettings)* settings, const(SvgNode)[] s
 }
 
 size_t renderNodes(File file, const(SvgPatternSettings)* settings, const(SvgNode)[] svgNodes, size_t center, size_t y)
-                   
+
 {
   if(svgNodes.length > 0) {
     SvgNode node = svgNodes[0].unconst;
@@ -450,11 +450,11 @@ size_t renderNodes(File file, const(SvgPatternSettings)* settings, const(SvgNode
         y += settings.curveRadius*2; // make room for incoming loop rail
       }
 
-      
+
       renderDebugHeight(file, font12, "bottom rail margin", "blue", center, y, settings.railMarginY);
       y += settings.railMarginY;
       // y should be located at the top of the node
-      
+
       if(loopRailY) {
         renderRail(file, settings, center, center + node.rightWidth + node.margin(settings) + settings.roadPadding,
                    loopRailY, y + node.height + settings.railMarginY + settings.curveRadius);
@@ -469,7 +469,7 @@ size_t renderNodes(File file, const(SvgPatternSettings)* settings, const(SvgNode
         renderRail(file, settings, center, center - node.leftWidth - node.margin(settings) - settings.roadPadding,
                    optionRailBranchY, optionRailJoinY);
       }
-      
+
       file.writefln(`  <line x1="%s" y1="%s" x2="%s" y2="%s" style="stroke:black;stroke-width:%s" />`,
                     center, previousNodeBottom, center, y, settings.lineWidth);
     }
@@ -483,7 +483,7 @@ class SvgNodeCreator : IMatcherVisitHandler
 {
   SvgNode[] svgNodes;
   const(SvgPatternSettings)* settings;
-  
+
   const(char)[] nextName;
   CountType nextCountType;
   size_t nextIndex;
@@ -517,6 +517,14 @@ class SvgNodeCreator : IMatcherVisitHandler
       svgNodes[nextIndex] = new SvgSingleNode(nextCountType, "'"~matcher.keyword~"'", settings);
     }
   }
+  final void visit(const(PrimitiveTypeMatcher!ConstructPointer) matcher)
+  {
+    if(nextName) {
+      svgNodes[nextIndex] = new SvgSingleNode(nextCountType, "pointer (" ~ nextName ~ ")", settings);
+    } else {
+      svgNodes[nextIndex] = new SvgSingleNode(nextCountType, "pointer", settings);
+    }
+  }
   final void visit(const(PrimitiveTypeMatcher!ConstructString) matcher)
   {
     if(nextName) {
@@ -532,6 +540,14 @@ class SvgNodeCreator : IMatcherVisitHandler
     } else {
       svgNodes[nextIndex] = new SvgSingleNode(nextCountType, "bool", settings);
     }
+  }
+  final void visit(const(PrimitiveTypeMatcher!ConstructNumber) matcher)
+  {
+    throw imp();
+  }
+  final void visit(const(PrimitiveTypeMatcher!ConstructNumber) matcher)
+  {
+    throw imp();
   }
   final void visit(const(PrimitiveTypeMatcher!ConstructList) matcher)
   {
@@ -556,6 +572,18 @@ class SvgNodeCreator : IMatcherVisitHandler
     } else {
       svgNodes[nextIndex] = new SvgSingleNode(nextCountType, "block", settings);
     }
+  }
+  final void visit(const(PrimitiveTypeMatcher!ConstructType) matcher)
+  {
+    throw imp("visit ConstructType");
+  }
+  final void visit(const(PrimitiveTypeMatcher!ConstructClass) matcher)
+  {
+    throw imp("visit ConstructClass");
+  }
+  final void visit(const(TypedListMatcher) matcher)
+  {
+    throw imp("visit TypedListMatcher");
   }
   final void visit(const(ConstructPattern) matcher)
   {
@@ -587,13 +615,13 @@ void printSvg(Pattern pattern, File file, const(SvgPatternSettings)* settings)
 
   auto width  = 2*settings.graphicMarginX + bounds.left + bounds.right;
   auto height = 2*settings.graphicMarginY + bounds.height;
-  
+
   file.writefln(`<svg xmlns="http://www.w3.org/2000/svg" version="1.1" font-family="Consolas" font-size="%s" width="%s" height="%s">`,
                 settings.font.size, width, height);
 
   // background
   file.writefln(`  <rect x="0" y="0" width="%s" height="%s" style="fill:#f9f9f9" />`, width, height);
-		
+
   //printGrid(file, 0, 0, 1000, 1000, 10);
   //printGrid(file, 0, 0, 1000, 1000, settings.font.charBoxWidth);
 

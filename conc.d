@@ -12,9 +12,9 @@ import std.format : formattedWrite;
 import utf8;
 import backend : loadBackendConstructs;
 import construct.logging;
-import construct.ir;
-import construct.parser : SourceFile, getParser, ConstructParseException;
-import construct.processor : ImportPath, ConstructProcessor, SemanticException;
+import construct.parserCore : isConstructBuilder, ConstructObject, ConstructException;
+import construct.parser     : SourceFile, getParser, ConstructParseException;
+import construct.processor  : ImportPath, ConstructProcessor, SemanticException;
 
 void usage(string program)
 {
@@ -27,7 +27,7 @@ int main(string[] args)
   getopt(args,
 	 "v|verbose", &verbose);
   args = args[1..$];
-    
+
   if(args.length <= 0) {
     usage(program);
     return 0;
@@ -47,8 +47,6 @@ int main(string[] args)
     }
   }
 
-  
-
   SourceFile constructFile = SourceFile(args[0]);
   if(!exists(constructFile.name)) {
     writefln("Error: construct file '%s' does not exist", constructFile.name);
@@ -56,15 +54,15 @@ int main(string[] args)
   }
 
   static if(isConstructBuilder!(Appender!(const(ConstructObject)[]))) {
-    
+
   } else static assert(0, "appender is not a construct builder");
-  
+
   auto parser = getParser!(Appender!(const(ConstructObject)[]))(constructFile.name);
   if(!parser.name) {
     writefln("Error: could not find a parser for file '%s'", constructFile.name);
     return 1; // fail
   }
-  
+
   //writefln("[CONC] Loading constructs from '%s'...", constructFile.name);
   //stdout.flush();
   auto constructCode = cast(string)read(constructFile.name);
@@ -78,7 +76,7 @@ int main(string[] args)
     }
     return 1;
   }
-  
+
   ConstructProcessor processor = ConstructProcessor
     ([
       //ImportPath(buildNormalizedPath("..","std"), "std"),

@@ -2,20 +2,10 @@ module construct.parser;
 
 import std.path : extension;
 
-import construct.ir;
+import construct.parserCore;
 static import construct.standardParser;
 //static import construct.jsonParser;
 
-class ConstructParseException : Exception
-{
-  size_t constructLineNumber;
-  this(size_t constructLineNumber, string msg, string codeFile = __FILE__,
-       size_t codeLine = __LINE__) pure
-  {
-    super(msg, codeFile, codeLine);
-    this.constructLineNumber = constructLineNumber;
-  }
-}
 struct SourceFile
 {
   const(char)[] name;
@@ -24,7 +14,7 @@ struct SourceFile
 
 struct ConstructParser {
   string name;
-  const(ConstructObject)[] function(const(char)[] code) pure func;
+  const(ConstructObject)[] function(string code) pure func;
 }
 
 template standardParser(T) {

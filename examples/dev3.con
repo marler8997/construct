@@ -5,9 +5,6 @@
 // Function Constructs
 //
 
-defcon message();
-//defcon function(name symbol);
-
 
 
 defcon mainFunction(argsSymbol symbol, code constructBlock);

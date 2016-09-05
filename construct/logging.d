@@ -81,5 +81,3 @@ void pureLogError(A...)(in char[] fmt, A args) pure
 {
   pureLog(LogLevel.error, fmt, args);
 }
-
-

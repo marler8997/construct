@@ -1,0 +1,31 @@
+import "util"
+
+
+class Animal
+{
+  defcon print()
+  {
+    message "I am an animal";
+  }
+}
+
+/*
+class Dog : Animal
+{
+  overrideClassCon sayWhoYouAre
+  {
+    message "I am MyClass";
+  }
+}
+*/
+
+
+let animal new Animal;
+
+
+expectFail {
+  animal.nonExistentMember
+}
+
+animal.print
+

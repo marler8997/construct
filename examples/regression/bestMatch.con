@@ -1,0 +1,10 @@
+
+defcon matchMe(value anything) {
+  message "matched the value as anything";  
+}
+
+defcon matchMe(value number) {
+  message "matched the value as number";
+}
+
+

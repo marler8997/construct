@@ -1,6 +1,4 @@
 
-
-
 Current Ideas
 ===========================================================
 Every construct begins with the name of the construct.
@@ -31,8 +29,183 @@ easily determine the order of operations (todo: come up with examples)
 
 #### The Dot Operattor
 
+I would like the dot operator to work, but not sure how yet.
+```
+let fruits ("apple" "banana" "orange")
+message "I have " fruits.length " fruits";
+
+// try to find an example that make the dot operator ambiguous
+
+something.length // works
 
 
+constructA constructB . name
+
+constructA (constructB.name)
+OR
+(constructA constructB).name
+
+One idea, the dot operator has higher precedence than a construct.
+So that would mean this one:
+
+constructA (constructB.name)
+
+I think I need to change the semantics of parenthesis a little.
+Instead of using them to delimit lists, maybe they should be used
+to indicate to the compiler about execution precedence?
+
+So to indicate the other way, you would write
+
+(constructA constructB).name
+
+
+What about construct patterns?
+pattern aValue
+pattern (aValue)
+pattern aValue string
+pattern (aValue string)
+pattern aValue string, anotherValue string
+pattern (aValue string, anotherValue string)
+
+With the order of execution semantics, you could do this:
+
+(pattern aValue)
+
+What about other operators?
+
+plusplus?
+
+3 plus 2 plusplus?
+
+
+I think it has to work like this. Every time you go to match a value to a construct, you need
+to look at the next object.
+
+3 ?
+
+If the next object takes an object on it's left side, you have to evaluate it immediately, unless,
+it's outside a paranthesis boundary...or I could use another boundary?
+
+```
+
+If I do this, then the operations are going to have to have a precendence, picture this:
+```
+a.b.c
+```
+
+The first '.' should have higher priority then the second '.' because it should be evaluated left to right:
+```
+(a.b).c
+```
+
+But if you mixed different operations say this:
+```
+a+b.c
+```
+Then this MUST BE:
+```
+a+(b.c)
+```
+Which isn't left to right.  This can only be performed correctly if you know that
+the '.' operator has a higher precedence than the '+' operator.  So when the '.'
+operator is defined, it must be stated in some way:
+```
+opPrecedence . higherThan *;
+opPrecedence * higherThan +;
+```
+
+
+So every time a value is processed, there must be 2 precedences, the current
+precendence, and the precedence of a potential operation. i.e.
+```
+a+b*c // a+(b*c)
+a.b*c // (a.b)*c
+a*b.c // a*(b.c)
+```
+
+What about defining the operations? Similar to defcons:
+```
+defop . (value, nameless "type")
+{
+  // returns the type of value
+}
+// allows somevalue.type
+
+defop . (s string, nameless "byteLength")
+{
+  // adds the ".byteLength" property to strings
+}
+
+```
+
+
+### Construct and Operator Precedence
+
+Precedence can be represented by railroad diagrams.
+In order to be comparable, two operators must be connected
+by a rail that doesn't switch directions.
+
+A can be compared to B:
+```
+( A )---(...)           (...)---( B )
+           \             /
+            \---(...)---/
+```
+
+A cannot be compared to B:
+```
+( A )---(...)   ( B )---(...)
+           \             /
+            \---(...)---/
+```
+
+These rails are created with a sequence of "higherThan" and "lowerThan" constructs:
+```
+precedenceGroup summation + -;
+precedenceGroup multipler * /;
+precedence multipler higherThan summation;
+
+// ERRORS:
+precedence * higherThan summation; // ERROR: * is already part of a precedenceGroup 'multipler'
+precedence multipler higherThan +; // ERROR: + is already part of a precedenceGroup 'summation'
+
+precedence . higherThan multipler;
+precedence construct higherThan .;
+
+// ( + - )---( * / )---( . )---(construct)
+```
+Say the operator modulus `%` is higher than summation,
+but not int the same group as `*` and `/`:
+```
+precedence % higherThan summation;
+//
+// ( + - )---( * / )---( . )---(construct)
+//      \
+//       \---( % )
+//
+```
+Now if you saw `a.b%c`, you will get an error because
+the `%` operator is not comparable with the `.` operator.
+
+But now let's put it in the same tree:
+```
+precedence % lowerThan .;
+//
+// ( + - )---( * / )---( . )---(construct)
+//      \               /
+//       \---( % )-----/
+//
+```
+Now `%` can be compared to everything but `.` and `construct`.
+If you would like `%` to be comparable to `%`, you could use this construct:
+```
+addToPrecedenceGroup multipler %;
+// ( + - )---( * / % )---( . )---(construct)
+```
+
+Implicit Cast Operators
+--------------------------------
+Provide a way to write implicit cast operators.
 
 The semi-colon
 --------------------------------
@@ -88,73 +261,6 @@ defcon exec (code constructBlock);
 //defcon deftype
 ```
 
-
-The Symbol Context
-================================================================================
-The "symbol context" applies whenever a construct expects a symbol.  For
-example, the 'defcon' construct always expects a symbol immediately afterwards:
-```C
-defcon someSymbol
-//     |--------|
-//         |
-//     This is where the symbol context applies
-```
-Normally, whenever a symbol appears, it is looked up in the symbol table, but
-in the symbol context, this lookup is not done and whatever symbol appears
-is used.
-
-However, there are times when the developer may want to use a symbol based on
-a construct expression.  Say you wanted to define a construct based on some
-value.
-```C
-// assume 'name' is a string
-defcon name
-```
-This won't work because name appears in a symbol context, so the fact that it's
-already defined as a string is ignored and a new construct named 'name' is added
-to the symbol table shadowing the current entry.  This is where the 'sym' keyword
-comes in.  The sym keyword is used to escape the symbol context and go back to
-normal construct evaluation.  'sym' will take any expression that evaluates to
-a string or a symbol, and return it as a symbol as if it were written in the
-original symbol context. So if we use it in the previous example:
-```C
-// assume 'name' is a string again
-defcon sym name
-```
-This time, the sym keyword caused name to be looked up.  Since it evaluates to
-a string, the sym keyword will transform it to a symbol and now we've defined
-a new construct whose name was derived from a string. If the name variable was
-set to "myCoolConstruct" then this would have been equivalent to
-```C
-defcon myCoolConstruct
-```
-
-### Examples of using the sym keyword
-```C
-defcon setTo10(x symbol) {
-  set sym x 10;
-}
-
-let myvar 0;
-message "x is: " x;
-setTo10 myvar
-message "x is: " x;
-
-// Output:
-// x is: 0
-// x is: 10
-
-
-//
-
-let postfix "SomePostfix";
-
-defcon sym append "myCoolFunc" postfix() {}
-// equivalent to defcon myCoolFuncSomePostfix
-```
-
-
-
 Pattern Consumers:
 --------------------------------------------------
 Consume objects if they match the pattern.
@@ -175,7 +281,7 @@ The '/' construct
 The '++' construct
   number '++'
   pointer '++'
-  
+
 
 
 
@@ -198,7 +304,7 @@ symbol value
 defcon let (newSymbol symbol, value, optional break)
 {
     // code to add symbol
-    
+
 }
 
 #### struct construct
@@ -220,7 +326,7 @@ struct CatchInfo {
 
 defcon try (tryBlock block, catchBlocks CatchInfo list itemPrefix="catch", finallyBlock block prefix="finally")
 {
-  // ...   
+  // ...
 }
 
 defcon <name> (<consumer>)

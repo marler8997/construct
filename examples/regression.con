@@ -7,4 +7,5 @@ import "regression/basics"
 import "regression/patterns"
 import "regression/defcon"
 import "regression/foreach"
-
+import "regression/ops"
+import "regression/classes"

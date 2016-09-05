@@ -1,0 +1,6 @@
+import "asm"
+
+mov ax 100
+
+
+
