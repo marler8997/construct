@@ -6,21 +6,15 @@ alias LineNumber = size_t;
 alias StringSink = scope void delegate(const(char)[]);
 alias PureStringSink = scope void delegate(const(char)[]) pure;
 
-version(CheckConst) {
-  const(T) unconst(T)(const(T) obj)
-  {
-    return obj;
-  }
-} else {
-  T unconst(T)(const(T) obj)
-  {
-    return cast(T)obj;
-  }
-  immutable(T) immutable_(T)(T obj)// if( !is(immutable T U == T U) )
-  {
-    return cast(immutable(T))obj;
-  }
+T unconst(T)(const(T) obj)
+{
+  return cast(T)obj;
 }
+immutable(T) immutable_(T)(T obj)// if( !is(immutable T U == T U) )
+{
+  return cast(immutable(T))obj;
+}
+
 Exception imp(string feature = null, string file = __FILE__, size_t line = __LINE__) pure {
   Exception e;
   if(feature) {
@@ -28,8 +22,17 @@ Exception imp(string feature = null, string file = __FILE__, size_t line = __LIN
   } else {
     e = new Exception("not implemented", file, line);
   }
-  throw e;
+  //throw e;
   return e;
+}
+
+T singleton(T, A...)(A args)
+{
+  static T instance;
+  if(!instance) {
+    instance = new T(args);
+  }
+  return instance;
 }
 
 // Used to print a string with an 'a <string>' or 'an <string>' prefix depending
@@ -56,11 +59,12 @@ An an(T)(T enumValue) pure if( is( T == enum) )
 {
   return An(to!string(enumValue));
 }
+
 struct StringBuilder(size_t MaxSize)
 {
   char[MaxSize] buffer;
   size_t offset;
-  void append(const(char)[] s)
+  void append(const(char)[] s) pure
   {
     assert(offset + s.length <= MaxSize);
     buffer[offset..offset+s.length] = s;
@@ -71,17 +75,7 @@ struct StringBuilder(size_t MaxSize)
     return buffer[0..offset].idup;
   }
 }
-
-T singleton(T, A...)(A args)
-{
-  static T instance;
-  if(!instance) {
-    instance = new T(args);
-  }
-  return instance;
-}
-
-string formattedString(alias formatter, size_t maxLength = 4096, Args...)(Args args)
+string formattedString(alias formatter, size_t maxLength = 8192, Args...)(Args args)
 {
   StringBuilder!maxLength builder;
   formatter(&builder.append, args);

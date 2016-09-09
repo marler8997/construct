@@ -1,6 +1,6 @@
 import "util"
 
-
+/*
 class Animal
 {
   defcon print()
@@ -9,7 +9,6 @@ class Animal
   }
 }
 
-/*
 class Dog : Animal
 {
   overrideClassCon sayWhoYouAre
@@ -17,15 +16,13 @@ class Dog : Animal
     message "I am MyClass";
   }
 }
-*/
 
 
 let animal new Animal;
-
 
 expectFail {
   animal.nonExistentMember
 }
 
 animal.print
-
+*/

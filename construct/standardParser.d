@@ -237,6 +237,56 @@ immutable CharFlags[] charFlagsTable =
    CharFlags.validOperatorChar, // 127 '' (DEL)
    ];
 
+// TODO: add support for non-ascii symbols?
+bool isValidSymbol(const(char)[] str) pure
+{
+  if(str.length == 0) {
+    return false;
+  }
+
+  auto firstChar = str[0];
+
+  //
+  // Check if it is an operator symbol
+  //
+  auto firstCharFlags = lookupCharFlags(firstChar);
+  if(firstCharFlags & CharFlags.validOperatorChar) {
+    foreach(c; str[1..$]) {
+      auto charFlags = lookupCharFlags(c);
+      if(!(charFlags & CharFlags.validOperatorChar)) {
+        return false; // starts with operator chars, but then has non-operator chars
+      }
+    }
+    return true; // it is an operator symbol
+  }
+
+  //
+  // Check if it is a name symbol
+  //
+  if(isFirstCharacterOfSymbol(firstChar)) {
+    foreach(c; str[1..$]) {
+      if(!isSymbolCharacter(c)) {
+        return false; // starts with name symbol but, then then has non-name-symbol chars
+      }
+    }
+    return true; // it is a name symbol
+  }
+
+  return false; // the first character is not a valid symbol
+}
+unittest
+{
+  assert(isValidSymbol("a"));
+  assert(isValidSymbol("abc"));
+  assert(isValidSymbol("+"));
+  assert(isValidSymbol("."));
+  assert(!isValidSymbol("a."));
+  assert(!isValidSymbol(".a"));
+  assert(!isValidSymbol("abc."));
+  assert(!isValidSymbol(".abc"));
+}
+
+// TODO: probably should make these next 2 functions use the character flags table
 private bool isFirstCharacterOfSymbol(dchar c) pure
 {
   if(c >= 'A') {

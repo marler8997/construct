@@ -1,35 +1,78 @@
 The Construct Programming Language
-===================================================
-Construct is a programmable programming language.
-It starts with a set of basic data structures like string, numbers, symbols, lists and even code blocks.
-Using these basic data structures, it provides the means to create and compile the basic unit of logic called the 'construct'.
-A construct is a peice of code that consumes semantic objects during compilation.
-There are a set of predefined constructs, but the code itself can add new constructs and extend existing ones.
-Constructs are defined by a name, a pattern that consumes objects, and code to process those objects.
-Let's look at an example:
+================================================================================
+
+Examples
+--------------------------------------------------------------------------------
+helloWorld.con
 ```C
-defcon sayHello () {
-    message "Hello, World!";
+message "Hello, World!";
+```
+math.con
+```
+assert 2+3*4 == 14
+```
+
+Brief Introduction
+--------------------------------------------------------------------------------
+Construct is a _programmable_ programming language. It aims to provide robust
+interfaces to configure low level semantics for each application.
+
+The basic unit of the language is the "construct". A construct includes a name,
+a pattern, and a code block.  They are defined using this syntax:
+```
+defcon <name> (<pattern>) {
+  <code>
 }
 ```
-
-As the compiler reads this code, it will identify the `defcon` symbol as a predefined construct.
-The defcon construct has it's own pattern that will consume the rest of the code in this example.
-The `sayHello` symbol is passed to defcon and will be used as the symbol name for the newly defined construct.
-The parenthesis `()` include the pattern of objects that the `sayHello` construct will consume, since it
-is empty, `sayHello` does not consume any objects.
-The last part is the code block delimited by `{`curly braces`}`.
-In this case, it simply prints "Hello, World!" to the user.
-Executing this construct is a matter of writing the construct name as a symbol like this:
-```C
-sayHello
-sayHello
-// will print:
-// Hello, World!
-// Hello, World!
+Once a construct is defined, the compiler will invoke the construct when it
+finds the name followed by a set of objects that match the pattern. Take the
+following example.
+```
+defcon greet(name string, favoriteNumber number)
+{
+  message "Hello " name ", your favorite number is " favoriteNumber;
+}
+greet "Joe" 8
+greet "Molly" 4
+```
+The example prints the following message to the user:
+```
+Hello Joe, your favorite number is 8
+Hello Molly, your favorite number is 4
 ```
 
-Now lets define another construct that does consume objects.
+Syntax
+--------------------------------------------------------------------------------
+The syntax represents numbers, strings, symbols, `(` lists `)`, and
+`{`blocks `}`.  The grammar is as follows,
+```
+construct    ::= ( nameSymbol | operatorSymbol | number | string | block | list | ';' )*
+block        ::= '{' construct '}'
+list         ::= '(' (construct | ',')* ')'
+string       ::= '"' chars '"'
+symbolString ::= "'" nameSymbol
+```
+
+Compilation
+--------------------------------------------------------------------------------
+After the code is parsed into a list of objects, they are processed by the
+pattern matcher.  Once a construct pattern is matched, the construct code is
+executed with the matched objects. Take the following example:
+```C
+message "Hello, World!";
+```
+When the compiler sees the `message` symbol, it will look it up in the symbol
+table and see that it's a construct. The pattern matcher will match the
+following objects with one of the `message` construct patterns. The message
+construct pattern is defined as `(objects many, _ objectBreak)`. This means
+the pattern matcher will consume all objects until it reaches an objectBreak
+`;`, which in this example, is the rest of the objects.
+
+The defcon construct has it's own pattern
+```
+(name symbol, pattern list, code constructBlock)
+```
+Lets walk through an example of defining a construct:
 ```C
 defcon sayHelloTo(name string) {
     message "Hello, " name "!";
@@ -41,9 +84,27 @@ In this case, it consumes one object called `name` that is of type `string`.
 This construct can be called like this:
 ```C
 sayHelloTo "George"
-// will print:
-// Hello, George!
 ```
+Outputs:
+```
+Hello, George!
+```
+
+### Types
+The construct syntax is limited to a small set of objects, but once the objects
+are processed, they can become any one of many types including those defined by
+the application. 
+
+
+
+Primitve Types
+--------------------------------------------------------------------------------
+> TODO: fill in this section about primitive types, include pointers, booleans,
+types, classes, patterns and even constructs
+
+### Operator Constructs
+
+
 
 ## Custom Backends
 

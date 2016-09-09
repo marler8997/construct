@@ -1,7 +1,8 @@
 // -*-mode: c;-*-
 // Enables Syntax Highlighting for github and emacs
-import "util"
 
+//import "util"
+import relative "../util"
 //
 // Test Patterns
 //
@@ -35,15 +36,22 @@ import "util"
   oneSymbol a
   oneSymbol abc    
 }
+
+//
+// Test Optional Patterns
+//
+/*
 {
-  /*
-  defcon optionalString(s string optional)
+  defcon optionalUint(num optional uint, _ constructBreak)
   {
-    if s {
-      message "optionalString: " s;
-    } else {
-      message "optionalString nostring";
+    if num.present {
+      message "optionalUint: " num;
+    }
+    if not num.present {
+      message "optionalUint: not present";
     }
   }
-  */
+  optionalUint 3;
+  optionalUint;
 }
+*/

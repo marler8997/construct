@@ -1,6 +1,6 @@
 
-
-defmode calculator source result
+/*
+let calculator createMode handler (source result)
 {
   if result == null {
     throw "in calculator mode, every statement must evaluate to a number";
@@ -12,7 +12,8 @@ defmode calculator source result
     throw "in calculator mode, every statement must evalulate to a number, but got " result;
   }
 }
-changeMode calculator
+setMode calculator
 1
 2+3
 "Hello, World!".length
+*/

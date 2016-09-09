@@ -16,7 +16,7 @@ import construct.processor : ConstructProcessor, ProcessorFunc,
 void loadBackendConstructs(ConstructProcessor* processor) pure
 {
   processor.addSymbol("message", new immutable FunctionConstructDefinition
-                      ("message", 0, cast(string)processor.currentFile.name, ConstructAttributes.init, null, &messageHandler));
+                      ("message", 0, "[internal]", ConstructAttributes.init, null, &messageHandler));
 }
 ProcessorFunc loadConstructBackend(const(char)[] name) pure
 {
@@ -31,15 +31,14 @@ ProcessorFunc loadConstructBackend(const(char)[] name) pure
 }
 ConstructType loadBackendType(const(char)[] name)
 {
-  if(name == "string") {
-    return singleton!PrimitiveType(0, PrimitiveTypeEnum.utf8);
-  }
+  /*
   if(name == "systemString") {
     return singleton!PrimitiveType(0, PrimitiveTypeEnum.utf8);
   }
   if(name == "FileName") {
     return singleton!PrimitiveType(0, PrimitiveTypeEnum.utf8);
   }
+  */
   return null;
 }
 const(ConstructObject) messageHandler(ConstructProcessor* processor,

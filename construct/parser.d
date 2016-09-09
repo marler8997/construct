@@ -8,7 +8,9 @@ static import construct.standardParser;
 
 struct SourceFile
 {
-  const(char)[] name;
+  string relativeName; // should be normalized
+  string absoluteName; // should be normalized
+  string source;
   const(ConstructObject)[] parsedObjects = void;
 }
 

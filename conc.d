@@ -5,7 +5,7 @@ import std.stdio  : writeln, writefln, stdout, File;
 import std.getopt : getopt;
 import std.array  : appender, Appender;
 import std.file   : read, exists, mkdir;
-import std.path   : setExtension, baseName, dirName, buildNormalizedPath;
+import std.path   : setExtension, baseName, dirName, buildNormalizedPath, absolutePath;
 import std.string : format;
 import std.format : formattedWrite;
 
@@ -23,9 +23,10 @@ void usage(string program)
 int main(string[] args)
 {
   string program = args[0];
-
+  string[] importPathStrings;
   getopt(args,
-	 "v|verbose", &verbose);
+	 "v|verbose", &verbose,
+         "I", &importPathStrings);
   args = args[1..$];
 
   if(args.length <= 0) {
@@ -47,41 +48,58 @@ int main(string[] args)
     }
   }
 
-  SourceFile constructFile = SourceFile(args[0]);
-  if(!exists(constructFile.name)) {
-    writefln("Error: construct file '%s' does not exist", constructFile.name);
-    return 1;
+  SourceFile constructFile;
+  {
+    auto sourceFileString = args[0];
+    if(!exists(sourceFileString)) {
+      writefln("Error: construct file '%s' does not exist", sourceFileString);
+      return 1;
+    }
+    auto normalizedSourceFile = buildNormalizedPath(sourceFileString);
+    logDebug("source '%s' normalized to '%s'", sourceFileString, normalizedSourceFile);
+    auto absoluteNormalizedSourceFile = normalizedSourceFile.absolutePath.buildNormalizedPath;
+    constructFile = SourceFile(normalizedSourceFile, absoluteNormalizedSourceFile);
   }
 
   static if(isConstructBuilder!(Appender!(const(ConstructObject)[]))) {
 
   } else static assert(0, "appender is not a construct builder");
 
-  auto parser = getParser!(Appender!(const(ConstructObject)[]))(constructFile.name);
+  auto parser = getParser!(Appender!(const(ConstructObject)[]))(constructFile.relativeName);
   if(!parser.name) {
-    writefln("Error: could not find a parser for file '%s'", constructFile.name);
+    writefln("Error: could not find a parser for file '%s'", constructFile.relativeName);
     return 1; // fail
   }
 
   //writefln("[CONC] Loading constructs from '%s'...", constructFile.name);
   //stdout.flush();
-  auto constructCode = cast(string)read(constructFile.name);
+  auto constructCode = cast(string)read(constructFile.relativeName);
   try {
     constructFile.parsedObjects = parser.func(constructCode);
   } catch(ConstructParseException e) {
     if(e.constructLineNumber) {
-      writefln("%s(%s): ParseError: %s", constructFile.name, e.constructLineNumber, e.msg);
+      writefln("%s(%s): ParseError: %s", constructFile.relativeName, e.constructLineNumber, e.msg);
     } else {
-      writefln("%s: ParseError: %s", constructFile.name, e.msg);
+      writefln("%s: ParseError: %s", constructFile.relativeName, e.msg);
     }
     return 1;
   }
 
-  ConstructProcessor processor = ConstructProcessor
-    ([
-      //ImportPath(buildNormalizedPath("..","std"), "std"),
-      ImportPath(constructFile.name.dirName),
-      ]);
+  ImportPath[] importPaths = new ImportPath[importPathStrings.length+1];
+  importPaths[0] = ImportPath(constructFile.relativeName.dirName,
+                              constructFile.absoluteName.dirName);
+  foreach(i, importPathString; importPathStrings) {
+    if(!exists(importPathString)) {
+      writefln("Error: import path '%s' does not exist", importPathString);
+      return 1;
+    }
+    auto normalizedPath = buildNormalizedPath(importPathString);
+    logDebug("import path '%s' normalized to '%s'", importPathString, normalizedPath);
+    auto absoluteNormalizedPath = normalizedPath.absolutePath.buildNormalizedPath;
+    importPaths[i+1] = ImportPath(normalizedPath, absoluteNormalizedPath);
+  }
+  
+  ConstructProcessor processor = ConstructProcessor(importPaths);
   processor.loadExtendedConstructs();
   loadBackendConstructs(&processor);
   //writeln("[CONC] Done loading constructs. Processing them...");
@@ -102,9 +120,9 @@ int main(string[] args)
   } catch(ConstructParseException e) {
     writeln(); // blank line
     if(e.constructLineNumber) {
-      writefln("%s(%s): ParseError: %s", constructFile.name, e.constructLineNumber, e.msg);
+      writefln("%s(%s): ParseError: %s", constructFile.relativeName, e.constructLineNumber, e.msg);
     } else {
-      writefln("%s: ParseError: %s", constructFile.name, e.msg);
+      writefln("%s: ParseError: %s", constructFile.relativeName, e.msg);
     }
     return 1;
   } catch(ConstructException e) {

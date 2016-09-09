@@ -2,11 +2,11 @@ module construct.processor;
 
 import std.file   : exists, read;
 import std.format : format;
-import std.path   : setExtension, stripExtension, buildNormalizedPath;
+import std.path   : setExtension, stripExtension, buildNormalizedPath, absolutePath, dirName;
 import std.array  : Appender, appender, isDynamicArray, ElementEncodingType;
 import std.string : startsWith, indexOf;
 import std.conv   : to;
-import std.format : formattedWrite/*, format*/;
+import std.format : formattedWrite;
 
 import construct.util;
 import construct.logging;
@@ -22,7 +22,7 @@ class ConstructThrownException : ConstructException
 {
   this(size_t lineNumber, ConstructProcessor* processor, string msg) pure
   {
-    super(msg, cast(string)processor.currentFile.name, lineNumber);
+    super(msg, cast(string)processor.currentFile.relativeName, lineNumber);
   }
 }
 
@@ -35,7 +35,7 @@ class SemanticException: ConstructException
     if(processor.currentConstruct && processor.currentConstruct.filename.length > 0) {
       filename = processor.currentConstruct.filename;
     } else {
-      filename = processor.currentFile.name;
+      filename = processor.currentFile.relativeName;
     }
     super(msg, cast(string)filename, lineNumber);
   }
@@ -58,33 +58,32 @@ class ConstructAssertException: ConstructException
     if(processor.currentConstruct && processor.currentConstruct.filename.length > 0) {
       filename = processor.currentConstruct.filename;
     } else {
-      filename = processor.currentFile.name;
+      filename = processor.currentFile.relativeName;
     }
     super(msg, cast(string)filename, lineNumber);
   }
 }
 
-alias SymbolEntryList = OneOrMore!ISymbolObject;
+alias SymbolEntryList = OneOrMore!ConstructObject;
 alias SymbolTable = SymbolEntryList[string];
 
 struct ImportPath
 {
-  const(char)[] path;
+  const(char)[] relativePath; // should be normalized
+  const(char)[] absolutePath; // should be normalized
   const(char)[] prefix;
 }
 class ImportFile
 {
-  const char[] importName;
-  SourceFile sourceFile;
-  const(char)[] code;
+  string importName;
 
+  SourceFile sourceFile;
   SymbolTable publicSymbols;
 
-  this(const(char)[] importName, SourceFile sourceFile, const(char)[] code) pure
+  this(string importName, SourceFile sourceFile) pure
   {
     this.importName = importName;
     this.sourceFile = sourceFile;
-    this.code = code;
   }
 }
 
@@ -168,7 +167,13 @@ struct ScopeAndEntryList
 struct ConstructProcessor
 {
   ImportPath[] importPaths;
-  ImportFile[const(char)[]] importMap;
+
+  // key is the absolute normalized filename of the import file
+  // NOTE: every file that is imported should be in this map
+  ImportFile[string] importAbsoluteFilenameMap;
+
+  // key is the import name, should be path/path/.../name
+  ImportFile[string] importMap;
 
   SourceFile currentFile;
 
@@ -190,28 +195,32 @@ struct ConstructProcessor
        "false"         : SymbolEntryList(falseConstructDefinition.unconst),
        "true"          : SymbolEntryList(trueConstructDefinition.unconst),
        "null"          : SymbolEntryList(nullConstructDefinition.unconst),
-       "constructBreak": SymbolEntryList(constructBreakConstructDefinition.unconst),
-       //
-       // Types
-       //
-       "anything"      : SymbolEntryList(anythingConstructDefinition.unconst),
-       "list"          : SymbolEntryList(listConstructDefinition.unconst),
-       "bool"          : SymbolEntryList(boolConstructDefinition.unconst),
-       "number"        : SymbolEntryList(numberConstructDefinition.unconst),
-       "uint"          : SymbolEntryList(uintConstructDefinition.unconst),
-       "symbol"        : SymbolEntryList(symbolConstructDefinition.unconst),
-       "string"        : SymbolEntryList(stringConstructDefinition.unconst),
-       "pointer"       : SymbolEntryList(pointerConstructDefinition.unconst),
-       "type"          : SymbolEntryList(typeConstructDefinition.unconst),
-       "constructBlock": SymbolEntryList(constructBlockConstructDefinition.unconst),
-       "class"         : SymbolEntryList(classConstructDefinition.unconst),
+
        //
        // Basic Constructs
        //
        "pattern"       : SymbolEntryList(PatternConstruct.definition.unconst),
        ];
-  }
 
+    addPrimitiveType(PrimitiveType.predicate);
+    addPrimitiveType(PrimitiveType.bool_);
+    addPrimitiveType(PrimitiveType.number);
+    addPrimitiveType(PrimitiveType.uint_);
+    addPrimitiveType(PrimitiveType.string_);
+    addPrimitiveType(PrimitiveType.symbol);
+    addPrimitiveType(PrimitiveType.anything);
+    addPrimitiveType(PrimitiveType.nullable);
+    addPrimitiveType(PrimitiveType.type);
+    addPrimitiveType(PrimitiveType.constructBlock);
+    addPrimitiveType(PrimitiveType.pointer);
+    addPrimitiveType(PrimitiveType.list);
+    addPrimitiveType(PrimitiveType.class_);
+    addPrimitiveType(PrimitiveType.constructBreak);
+  }
+  private void addPrimitiveType(const(PrimitiveType) primitiveType) pure
+  {
+    currentScope.symbols[primitiveType.typeEnum.definition.name] = SymbolEntryList(primitiveType.unconst);
+  }
   private void addConstruct(const(ConstructDefinition) definition)
   {
     currentScope.symbols[definition.name] = SymbolEntryList(definition.unconst);
@@ -219,17 +228,18 @@ struct ConstructProcessor
   void loadExtendedConstructs()
   {
     addConstruct(ImportConstruct.definition);
+    //addConstruct(RelativeImportConstruct.definition);
     addConstruct(DefconConstruct.definition);
     addConstruct(ToSymbolConstruct.definition);
     //currentScope.symbols["deftype"]   = SymbolEntryList(singleton!DeftypeConstructDefinition());
     addConstruct(ExecConstruct.definition);
-    //addConstruct(ThrowConstruct.definition);
+    addConstruct(ThrowConstruct.definition);
     addConstruct(AssertConstruct.definition);
     addConstruct(tryConstructDefinition);
     addConstruct(LetConstruct.definition);
     addConstruct(SetConstruct.definition);
     addConstruct(LetSetConstruct.definition);
-    addConstruct(ifConstructDefinition);
+    addConstruct(IfConstruct.definition);
     addConstruct(NotConstruct.definition);
     addConstruct(foreachConstructDefinition);
     addConstruct(ListOfConstruct.definition);
@@ -257,8 +267,8 @@ struct ConstructProcessor
     //
     // Modes
     //
-    addConstruct(DefmodeConstruct.definition);
-    
+    addConstruct(CreateModeConstruct.definition);
+
     //
     // Memory
     //
@@ -297,64 +307,107 @@ struct ConstructProcessor
     scopeStack.shrinkTo(scopeStackLength-1);
   }
 
-  final void findAndImport(size_t importLineNumber, const(char)[] importName)
+  // Assumption: sourceFile.relativeName
+  final void import_(size_t importLineNumber, bool relative, string importName)
   {
-    auto imported = importMap.get(importName, null);
-    if(imported) {
-      logDebug("%s was already imported", importName);
-      return;
-    }
+    ConstructParser parser;
+    SourceFile importSourceFile;
+    if(relative) {
+      importSourceFile.relativeName = buildNormalizedPath(currentFile.relativeName.dirName, importName).setExtension(".con");
+      importSourceFile.absoluteName = buildNormalizedPath(importSourceFile.relativeName.absolutePath);
+      auto importEntry = importAbsoluteFilenameMap.get(importSourceFile.absoluteName, null);
+      if(importEntry) {
+        logDebug("relative import \"%s\" has already been imported (%s)", importName, importSourceFile.absoluteName);
+        return;
+      }
+      parser = standardParser!(Appender!(const(ConstructObject)[]));
+    } else {
 
-    SourceFile importFile;
-
-    // Find the import file
-    logInfo("searching for '%s'...", importName);
-    foreach(importPath; importPaths) {
-      auto nameSubPath = importName;
-      if(importPath.prefix.length) {
-        if(importName.length < importPath.prefix.length + 1 ||
-           !importName.startsWith(importPath.prefix) ||
-           importName[importPath.prefix.length] != '.') {
-          continue;
+      if(auto importEntry = importMap.get(importName, null)) {
+        if(importEntry) {
+          logDebug("\"%s\" was already imported", importName);
+          return;
         }
-        nameSubPath = importName[importPath.prefix.length+1..$];
       }
 
-      importFile.name = buildNormalizedPath(importPath.path, nameSubPath.setExtension(".con"));
-      ConstructParser parser;
-      if(exists(importFile.name)) {
-        parser = standardParser!(Appender!(const(ConstructObject)[]));
-        logInfo("    FOUND AT: %s", importFile.name);
-      } else {
-        logInfo("NOT FOUND AT: %s", importFile.name);
+      // Find the import file
+      // loop will set parser if it finds the file
+      logInfo("searching for import '%s'...", importName);
+      foreach(importPath; importPaths) {
+        auto nameSubPath = importName;
+        if(importPath.prefix.length) {
+          if(importName.length < importPath.prefix.length + 1 ||
+             !importName.startsWith(importPath.prefix) ||
+             importName[importPath.prefix.length] != '.') {
+            continue;
+          }
+          nameSubPath = importName[importPath.prefix.length+1..$];
+        }
 
-        importFile.name = importFile.name.stripExtension;
-        if(exists(importFile.name)) {
+        importSourceFile.relativeName = buildNormalizedPath(importPath.relativePath, nameSubPath.setExtension(".con"));
+        if(exists(importSourceFile.relativeName)) {
           parser = standardParser!(Appender!(const(ConstructObject)[]));
-          logInfo("    FOUND AT: %s", importFile.name);
+          logInfo("    FOUND AT: %s", importSourceFile.relativeName);
+          break;
         } else {
-          logInfo("NOT FOUND AT: %s", importFile.name);
+          logInfo("NOT FOUND AT: %s", importSourceFile.relativeName);
+
+          importSourceFile.relativeName = importSourceFile.relativeName.stripExtension;
+          if(exists(importSourceFile.relativeName)) {
+            parser = standardParser!(Appender!(const(ConstructObject)[]));
+            logInfo("    FOUND AT: %s", importSourceFile.relativeName);
+            break;
+          } else {
+            logInfo("NOT FOUND AT: %s", importSourceFile.relativeName);
+          }
         }
       }
 
-      if(parser.name) {
-        auto importCode = cast(string)read(importFile.name);
-	importFile.parsedObjects = parser.func(importCode);
+      if(!parser.name) {
+        throw semanticError(importLineNumber, format("import \"%s\" not found", importName));
+      }
 
-        // Have to do this before processing the import source
-        // so that it doesn't try to load the same import twice
-        auto importFileEntry = new ImportFile(importName, importFile, importCode);
-        importMap[importName] = importFileEntry;
-        logDebug("Added import '%s' to map", importName);
-        importFileEntry.publicSymbols = process(importFile);
-	return;
+      importSourceFile.absoluteName = buildNormalizedPath(importSourceFile.relativeName.absolutePath);
+
+      // check if the filename has already been imported using a relative import
+      if(auto importEntry = importAbsoluteFilenameMap.get(importSourceFile.absoluteName, null)) {
+        if(importEntry.importName == null) {
+          importEntry.importName = importName;
+        } else if(importEntry.importName != importName) {
+          throw new Exception(format("file imported with different names '%s' and '%s'", importEntry.importName, importName));
+        }
+        logInfo("import '%s' has already been imported somewhere else, but must have been a relative import", importName);
+        importMap[importName] = importEntry;
+        return;
       }
     }
 
-    throw new SemanticException(importLineNumber, &this, format("import '%s' not found", importName));
+
+    //
+    // The file has not been imported yet
+    //
+    importSourceFile.source = cast(string)read(importSourceFile.relativeName);
+    importSourceFile.parsedObjects = parser.func(importSourceFile.source);
+
+    auto importFileEntry = new ImportFile(importName, importSourceFile);
+
+    // Important to add the import entries before processing the import file
+    if(!relative) {
+      importMap[importName] = importFileEntry;
+      logDebug("Added '%s' to import map", importName);
+    }
+    importAbsoluteFilenameMap[importSourceFile.absoluteName] = importFileEntry;
+    logDebug("Added '%s' to import absolute filename map", importSourceFile.absoluteName);
+
+    //
+    // Process the import file
+    //
+    logDebug("Processing import file %s...", importSourceFile.relativeName);
+    importFileEntry.publicSymbols = process(importSourceFile);
+    logDebug("Done processing import file %s...", importSourceFile.relativeName);
   }
 
-  void addSymbol(string symbol, const(ISymbolObject) object) pure
+  void addSymbol(string symbol, const(ConstructObject) object) pure
   {
     Scope* addTo;
     if(currentScope.addSymbolsTo) {
@@ -372,7 +425,7 @@ struct ConstructProcessor
     }
   }
 
-  void setSymbol(size_t setLineNumber, const(char)[] symbol, const(ISymbolObject) object) pure
+  void setSymbol(size_t setLineNumber, const(char)[] symbol, const(ConstructObject) object) pure
   {
     auto scope_ = &currentScope;
     auto scopeIndex = scopeStack.data.length;
@@ -393,7 +446,7 @@ struct ConstructProcessor
       scope_ = &scopeStack.data[scopeIndex];
     }
   }
-  void letSetSymbol(const(char)[] symbol, const(ISymbolObject) object) pure
+  void letSetSymbol(const(char)[] symbol, const(ConstructObject) object) pure
   {
     auto entry = currentScope.symbols.get(cast(string)symbol, SymbolEntryList(null));
     if(entry.first) {
@@ -467,7 +520,7 @@ struct ConstructProcessor
 
     // Search other files
     if(!__ctfe) {
-      foreach(fileKeyValue; importMap.byKeyValue) {
+      foreach(fileKeyValue; importAbsoluteFilenameMap.byKeyValue) {
 	auto importFile = fileKeyValue.value;
 	auto match = importFile.publicSymbols.get(cast(string)symbol, SymbolEntryList(null));
 	if(match.first) {
@@ -581,10 +634,12 @@ struct ConstructProcessor
       } else {
         lineNumber = rawObject.lineNumber;
         result = consumeValueAlreadyCheckedIndex
-          (DefaultPrecedenceConsumer.instance, objects, &index).unconst;
+          (NoConstructContext.instance, objects, &index).unconst;
       }
 
       if(result) {
+        // TODO: call the mode handler
+
         if(auto return_ = result.tryAsConstructReturn) {
           return return_;
         }
@@ -595,17 +650,17 @@ struct ConstructProcessor
     return null;
   }
 
-  const(ConstructSymbol) consumeSymbol(const(IPrecedenceConsumer) precedenceConsumer,
+  const(ConstructSymbol) consumeSymbol(const(IConstructContext) constructContext,
                                        const(ConstructSymbol) context, const(ConstructObject)[] objects, size_t* index)
   {
-    auto symbol = tryConsumeSymbol(precedenceConsumer, objects, index);
+    auto symbol = tryConsumeSymbol(constructContext, objects, index);
     if(!symbol) {
       throw semanticError(context.lineNumber, format
                           ("construct '%s' expected a symbol", context.value));
     }
     return symbol;
   }
-  const(ConstructSymbol) tryConsumeSymbol(const(IPrecedenceConsumer) precedenceConsumer,
+  const(ConstructSymbol) tryConsumeSymbol(const(IConstructContext) constructContext,
                                           const(ConstructObject)[] objects, size_t* index)
   {
     size_t nextIndex = *index;
@@ -628,7 +683,7 @@ struct ConstructProcessor
       throw semanticError(symbol.lineNumber, "no objects followed the 'sym' keyword");
     }
 
-    auto result = consumeValueAlreadyCheckedIndex(precedenceConsumer, objects, &nextIndex).unconst;
+    auto result = consumeValueAlreadyCheckedIndex(constructContext, objects, &nextIndex).unconst;
     if(!result) {
       throw semanticError(symbol.lineNumber, "The 'sym' keyword expects an expression that evaluates to a symbol or string but evaulated to null");
     }
@@ -643,7 +698,7 @@ struct ConstructProcessor
     throw semanticError(symbol.lineNumber, format("The 'sym' keyword expects an expression that evaluates to a symbol or string but evaulated to %s", result.typeName));
   }
 
-  bool matchPattern(const(ConstructSymbol) constructSymbol, const(IPrecedenceConsumer) precedenceConsumer,
+  bool matchPattern(const(ConstructSymbol) constructSymbol, const(IConstructContext) constructContext,
                     const(PatternNode)[] patternNodes, const(ConstructObject)[] objects, size_t* index,
                     void delegate(const(ConstructObject) arg) pure appendArg)
   {
@@ -659,45 +714,63 @@ struct ConstructProcessor
           throw semanticError(constructSymbol.lineNumber, format("construct '%s' did not get enough objects, expected at least one '%s' next", constructSymbol.value, node.matcher.codeText));
           */
         }
-        if(node.matcher.processorOptionalValueType && node.name) {
+        if(node.type.internalValueClassIfOptional && node.name && node.name != "_") {
           appendArg(null);
         }
         continue;
       }
 
-      // Detect the symbol case
-      if(node.matcher.isSymbolMatcher) {
+      // Handle the symbol case
+      if(node.type.isAnySymbolType) {
 
-        if(!cast(SymbolMatcher)node.matcher) {
-          throw imp();
-        }
-        if(node.countType != CountType.one) {
-          throw imp(format("  matching symbol with count type %s", node.countType));
-        }
-        auto symbol = tryConsumeSymbol(precedenceConsumer, objects, index);
+        assert(node.countType == CountType.one);
+        auto symbol = tryConsumeSymbol(constructContext, objects, index);
         if(symbol is null) {
           return false; // not a match
         }
-        if(node.name) {
+        if(node.name && node.name != "_") {
           appendArg(symbol);
         }
         continue;
       }
 
+      // Handle the keyword case
+      if(auto keyword = node.type.tryAsKeyword) {
+        if(node.countType.isMultiple) {
+          throw imp("multiple keywords");
+        }
+
+        auto symbol = tryConsumeSymbol(constructContext, objects, index);
+        if(symbol is null || symbol.value != keyword) {
+          if(!node.countType.isOptional) {
+            return false; // not a match
+          }
+          if(node.name && node.name != "_") {
+            appendArg(null);
+          }
+          continue;
+        }
+        if(node.name && node.name != "_") {
+          appendArg(symbol);
+        }
+        continue;
+      }
+
+
       //logDev("  consuming value...");
-      auto value = consumeValueAlreadyCheckedIndex(precedenceConsumer, objects, index);
+      auto value = consumeValueAlreadyCheckedIndex(constructContext, objects, index);
       if(value is null) {
         throw imp("value is null");
       }
       // todo: handle returns
 
-      if(!node.matcher.match(value)) {
+      if(!node.type.supportsValue(value)) {
         if(!node.countType.isOptional) {
           //logDev("  did not match");
           return false; // not a match
           //throw semanticError(constructSymbol.lineNumber, format("construct '%s' expected %s but got %s", constructSymbol.value, An(node.matcher.codeText), An(value.typeName)));
         }
-        if(node.name) {
+        if(node.name && node.name != "_") {
           appendArg(null);
         }
         continue PATTERN_NODE_LOOP;
@@ -711,7 +784,7 @@ struct ConstructProcessor
         continue PATTERN_NODE_LOOP;
       }
       if(node.countType == CountType.optional) {
-        if(node.matcher.processorOptionalValueType && node.name) {
+        if(node.type.internalValueClassIfOptional && node.name && node.name != "_") {
           appendArg(value);
         }
         continue PATTERN_NODE_LOOP;
@@ -721,8 +794,9 @@ struct ConstructProcessor
     return true; // match
   }
 
-  const(ConstructObject) processPatternConstruct(const(ConstructSymbol) constructSymbol, const(ConstructDefinition) con,
-                                                 const(PatternHandler)[] patternHandlers, const(ConstructObject) opParam, const(ConstructObject)[] objects, size_t* index)
+  const(ConstructObject) processPatternConstruct(const(ConstructSymbol) constructSymbol, const(ConstructDefinition) con, bool hasOperatorObject,
+                                                 const(ConstructObject) opParam, const(PatternHandler)[] patternHandlers, const(ConstructObject)[] objects, size_t* index)
+
   {
     ConstructObject[256] constructArgs;
     size_t constructArgCount = 0;
@@ -734,15 +808,12 @@ struct ConstructProcessor
       constructArgs[constructArgCount++] = arg.unconst;
     }
 
-    if(con.opParam.matcher !is null) {
-      if(!opParam) {
-	throw new Exception(format("CodeBug: processPatternConstruct got an operator construct '%s' but the opParam is null", constructSymbol.value));
-      }
+    if(hasOperatorObject) {
       appendArg(opParam);
     }
     //logDev("construct '%s' is %s", constructSymbol.value, (con.opParam.matcher is null) ? "NULL" : "NOT NULL");
 
-    ConstructHandler handler = null;
+    PatternHandler matched = PatternHandler();
     foreach(patternHandlerIndex, patternHandler; patternHandlers) {
       size_t nextIndex;
       nextIndex = *index;
@@ -752,13 +823,13 @@ struct ConstructProcessor
       }
       //logDev("Attempting to match pattern %d for construct '%s'...", patternHandlerIndex, constructSymbol.value);
       if(matchPattern(constructSymbol, con, patternHandler.patternNodes, objects, &nextIndex, &appendArg)) {
-        handler = patternHandler.handler;
+	matched = patternHandler.unconst;
         *index = nextIndex;
         break;
       }
     }
 
-    if(handler == null) {
+    if(matched.handler == null) {
       throw semanticError(constructSymbol.lineNumber, format("construct '%s' had no pattern that matched the following contruct objects", constructSymbol.value));
     }
 
@@ -768,19 +839,24 @@ struct ConstructProcessor
     /*
     logDev("Setup %d argument(s) for construct '%s':", constructArgCount, constructSymbol.value);
     foreach(i, arg; constructArgs[0..constructArgCount]) {
-      logDev("  [%s] %s (%s)", i, arg, arg.typeName);
+      if(arg) {
+	logDev("  [%s] %s (%s)", i, arg, arg.typeName);
+      } else {
+	logDev("  [%s] null", i);
+      }
     }
     */
-    return handler(&this, con, constructSymbol, constructArgs[0..constructArgCount]);
+
+    return matched.handler(&this, con, constructSymbol, matched.patternNodes, constructArgs[0..constructArgCount]);
   }
 
-  const(ConstructObject) consumeValue(const(IPrecedenceConsumer) precedence, const(ConstructSymbol) constructSymbol,
+  const(ConstructObject) consumeValue(const(IConstructContext) constructContext, const(ConstructSymbol) constructSymbol,
                                       const(ConstructObject)[] objects, size_t* index)
   {
     if(*index >= objects.length) {
       throw endedInsideConstruct(constructSymbol);
     }
-    return consumeValueAlreadyCheckedIndex(precedence, objects, index);
+    return consumeValueAlreadyCheckedIndex(constructContext, objects, index);
   }
 
   // TODO: this function needs to know the current precedence.
@@ -795,7 +871,7 @@ struct ConstructProcessor
   //   operatorPrecedence . higherThan *
   //
   // Assumption: *index < objects.length
-  const(ConstructObject) consumeValueAlreadyCheckedIndex(const(IPrecedenceConsumer) precedence,
+  const(ConstructObject) consumeValueAlreadyCheckedIndex(const(IConstructContext) constructContext,
                                                          const(ConstructObject)[] objects, size_t* index)
   {
     assert(*index < objects.length);
@@ -807,7 +883,7 @@ struct ConstructProcessor
     (*index)++;
     if(auto symbol = object.tryAsConstructSymbol.unconst) {
 
-      logDebug("looking up symbol '%s' on line %s...", symbol.value, symbol.lineNumber);
+      //logDebug("looking up symbol '%s' on line %s...", symbol.value, symbol.lineNumber);
       auto symbolEntries = tryLookupSymbol(symbol.value);
       if(!symbolEntries.first) {
         throw semanticError(symbol.lineNumber, format("symbol '%s' does not exist", symbol.value));
@@ -817,17 +893,16 @@ struct ConstructProcessor
       }
 
       if(auto definition = symbolEntries.first.tryAsConstructDefinition) {
-        if(definition.opParam.matcher !is null) {
-          throw semanticError(symbol.lineNumber, format
-                              ("the %s construct is an operator and expects %s before it, but did not get one", symbol.value, An(definition.opParam.matcher.codeText)));
-        }
-
         //logDev("(inside construct '%s') processing '%s'...", precedence.getOperatorString(), symbol.value);
-        auto patternHandlers = definition.getPatternHandlers();
-        if(patternHandlers is null) {
-          object = definition.processNoPattern(&this, symbol, null, objects, index).unconst;
+        if(auto noPatternConstruct = definition.tryAsNoPatternConstruct()) {
+          object = noPatternConstruct.processNoPattern(&this, symbol, null, objects, index).unconst;
         } else {
-          object = processPatternConstruct(symbol, definition, patternHandlers, null, objects, index).unconst;
+          auto patternHandlers = definition.getPatternHandlers(null);
+          if(patternHandlers is null) {
+            throw semanticError(symbol.lineNumber, format
+                                ("the %s construct is missing an object to operate on (it only has 'this' patterns)", symbol.value));
+          }
+          object = processPatternConstruct(symbol, definition, false, null, patternHandlers, objects, index).unconst;
         }
         //logDev("(inside construct '%s') done processing '%s'...", precedence.getOperatorString(), symbol.value);
 
@@ -848,11 +923,11 @@ struct ConstructProcessor
 	break; // object is not a symbol
       }
 
-      logDebug("looking up symbol '%s' on line %s to see if it is an operation with higher precedence...", symbol.value, symbol.lineNumber);
+      //logDebug("looking up symbol '%s' on line %s to see if it is an operation with higher precedence...", symbol.value, symbol.lineNumber);
       auto symbolEntries = tryLookupSymbol(symbol.value);
       //logDev("symbol '%s' entry is %s", symbol.value, symbolEntries);
       if(!symbolEntries.first) {
-	logDebug("  '%s' does not have a value in the symbol table", symbol.value);
+	//logDebug("  '%s' does not have a value in the symbol table", symbol.value);
 	break; // symbol does not exist
       }
 
@@ -863,33 +938,40 @@ struct ConstructProcessor
       //logDev("Checking if symbol '%s' is an operator construct", symbol.value);
       auto definition = symbolEntries.first.tryAsConstructDefinition;
       if(!definition) {
-	logDebug("symbol '%s' is not a construct", symbol.value);
+	//logDebug("symbol '%s' is not a construct", symbol.value);
 	break; // symbol is not a construct
       }
-      if(definition.opParam.matcher is null) {
-	logDebug("construct '%s' is not an operator construct", symbol.value);
+      if(!definition.hasOperatorPatterns()) {
+	//logDebug("construct '%s' is not an operator construct", symbol.value);
 	break; // symbol is not an operator construct
       }
 
-      auto currentOpString = precedence.getOperatorString();
-      if(currentOpString) {
-	if(!Precedence.greaterThan(symbol.value, currentOpString)) {
-	  logDebug("operator construct '%s' precedence %s is not higher then the current operator '%s' precedence %s",
-                   symbol.value, Precedence.getPrecedence(symbol.value),
-                   currentOpString, Precedence.getPrecedence(symbol.value));
-	  break; // precedence is not high enough
-	}
-	logDebug("Operator '%s' is higher precedence than '%s'", definition.getOperatorString, currentOpString);
+      // Check precedence
+      if(constructContext.hasOperatorPatterns()) {
+        auto currentOpString = constructContext.getConstructName();
+        if(currentOpString) {
+          if(!Precedence.greaterThan(symbol.value, currentOpString)) {
+	    /*
+            logDebug("operator construct '%s' precedence %s is not higher then the current operator '%s' precedence %s",
+                     symbol.value, Precedence.getPrecedence(symbol.value),
+                     currentOpString, Precedence.getPrecedence(symbol.value));
+	    */
+            break; // precedence is not high enough
+          }
+          logDebug("Operator construct '%s' is higher precedence than '%s'", definition.name, currentOpString);
+        }
+      }
+
+      // Check if it supports this object
+      auto patternHandlers = definition.getPatternHandlers(object);
+      if(!patternHandlers) {
+	//logDebug("construct '%s' is not an operator construct", symbol.value);
+	break; // this construct operator does not support this object
       }
 
       (*index)++;
       //logDev("--> %s is an operator construct with a higher precedence", symbol.value);
-      auto patternHandlers = definition.getPatternHandlers();
-      if(patternHandlers is null) {
-	object = definition.processNoPattern(&this, symbol, object, objects, index).unconst;
-      } else {
-	object = processPatternConstruct(symbol, definition, patternHandlers, object, objects, index).unconst;
-      }
+      object = processPatternConstruct(symbol, definition, true, object, patternHandlers, objects, index).unconst;
       //logDev("<-- %s is done being processed", symbol.value);
     }
 
@@ -897,10 +979,10 @@ struct ConstructProcessor
   }
 
 
-  const(T) consumeTypedValue(T)(const(IPrecedenceConsumer) precedence, const(ConstructSymbol) constructSymbol,
+  const(T) consumeTypedValue(T)(const(ConstructDefinition) constructDefinition, const(ConstructSymbol) constructSymbol,
                                 const(ConstructObject)[] objects, size_t* argIndex) if( !is( T == ConstructSymbol) )
   {
-    auto object = consumeValue(precedence, constructSymbol, objects, argIndex);
+    auto object = consumeValue(constructDefinition, constructSymbol, objects, argIndex);
     if(object is null) {
       throw semanticError(constructSymbol.lineNumber, format
                           ("the %s construct expects %s but got no value", constructSymbol.value, An(T.staticTypeName)));
@@ -981,10 +1063,11 @@ class FunctionConstructDefinition : NoPatternConstruct
   }
 }
 const(ConstructObject) handleConstructWithBlock
-(ConstructProcessor* processor, const(ConstructDefinition) definition, const(ConstructSymbol) constructSymbol, const(ConstructObject)[] args)
+(ConstructProcessor* processor, const(ConstructDefinition) definition, const(ConstructSymbol) constructSymbol,
+ const(PatternNode)[] patternNodes, const(ConstructObject)[] args)
 {
   auto withBlock = cast(ConstructWithBlockDefinition)definition;
-  auto patternNodes = withBlock.getPatternHandlers()[0].patternNodes;
+  //auto patternNodes = withBlock.getPatternHandlers()[0].patternNodes;
 
   //logDev("pattern is '%s'", pattern);
   if(args.length != patternNodes.length) {
@@ -998,8 +1081,9 @@ const(ConstructObject) handleConstructWithBlock
     auto arg = args[i];
     auto patternNode = patternNodes[i];
 
-    if(patternNode.name.length > 0 && patternNode.name != "nameless") {
+    if(patternNode.name.length > 0 && patternNode.name != "_") {
       processor.addSymbol(patternNode.name, arg);
+      //logDev("Added construct symbol '%s': %s", patternNode.name, arg);
     }
   }
 
@@ -1008,11 +1092,12 @@ const(ConstructObject) handleConstructWithBlock
 class ConstructWithBlockDefinition : PatternConstructDefinition
 {
   const ConstructBlock block;
-  this(string name, immutable(PatternNode)[] patternNodes, size_t lineNumber, string filename, ConstructAttributes attributes,
+  this(string name, immutable(PatternHandler)[] noOpPatternHandlers,
+       immutable(OpPatternHandlers)[] opPatternHandlers, size_t lineNumber, string filename, ConstructAttributes attributes,
        immutable(ConstructType) evalTo, immutable(ConstructBlock) block) immutable pure
   {
     // TODO: how to support OpParam
-    super(name, OpParam(), [immutable PatternHandler(patternNodes, &handleConstructWithBlock)], lineNumber, filename, attributes, evalTo);
+    super(name, noOpPatternHandlers, opPatternHandlers, lineNumber, filename, attributes, evalTo);
     this.block = block;
   }
 }
@@ -1073,19 +1158,6 @@ class CallerScopeConstructDefinition : ConstructDefinition
   }
 }
 */
-  /*
-class ThrowConstructDefinition : ConstructDefinition
-{
-  this() { super(0, null, ConstructAttributes.init, null, null, null); }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-                                                const(ConstructObject)[] objects, size_t* argIndex) const
-  {
-    auto message = processor.consumeTypedValue!ConstructString(constructSymbol, objects, argIndex);
-    throw new ConstructThrownException(constructSymbol.lineNumber, processor, cast(string)message.toUtf8());
-  }
-}
-  */
-
 class TypeOfConstructDefinition : ConstructDefinition
 {
   this() { super(0, null, ConstructAttributes.init, new PrimitiveType(0, PrimitiveTypeEnum.type), null, null); }

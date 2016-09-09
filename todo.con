@@ -8,6 +8,11 @@ defcon item (name symbol,
     // TODO: do something with the item
 }
 
+
+item DefaultValue "for optional pattern nodes, there should be a way to specify a default value"
+item OptionalValue "I need to come up with semantics for optional values that aren't specified.  For nullable types, the default value (when the value isn't specified) could be null.  For non-nullable types, they could be wrapped in a tagged struct, that specifies whether the value is present or not.  struct OptionalValue { bool present; T value; }"
+
+
 item EmitAndProcess "Develop the concept of emitting constructs, and processing them."
 item JsonBackend "Create a backend that will write JSON."
 item Enums "Think about defining an enum implementation, either in the language or in a library, not sure which."

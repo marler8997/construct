@@ -9,7 +9,7 @@ import std.typecons : BitFlags;
 import construct.util;
 import construct.logging;
 import construct.parserCore;
-import construct.patterns   : PatternNode, Matcher, IMatcherVisitHandler, TypedListMatcher;
+import construct.patterns   : PatternNode, PatternTree, Pattern;
 import construct.processor  : ConstructProcessor, Scope;
 
 //version = VerboseTests;
@@ -17,9 +17,12 @@ import construct.processor  : ConstructProcessor, Scope;
 enum PrimitiveTypeEnum {
   anything,
 
-  void_,
-  constructBreak,
+  predicate,
   nullable,
+  //void_,
+  comment,
+
+  constructBreak,
 
   type,
 
@@ -45,7 +48,7 @@ enum PrimitiveTypeEnum {
   class_,
 
   array,
-  string,
+  string_,
   ascii,
   unicode,
   utf8,
@@ -63,55 +66,66 @@ enum PrimitiveTypeEnum {
 
 struct PrimitiveTypeDefinition
 {
+  // The name should also be the symbol that is mapped to the type definition
+  // in the symbol table
   string name;
+
   PrimitiveTypeEnum typeEnum;
   PrimitiveTypeEnum parentTypeEnum;
-  immutable(Matcher) matcher;
-  this(string name, PrimitiveTypeEnum typeEnum, PrimitiveTypeEnum parentTypeEnum , immutable(Matcher) matcher = null) pure
+  immutable(PrimitiveType) typeObject;
+  string internalClassName;
+
+  this(string name, PrimitiveTypeEnum typeEnum, PrimitiveTypeEnum parentTypeEnum,
+       immutable(PrimitiveType) typeObject = null, string internalClassName = null) pure
   {
     this.name = name;
     this.typeEnum = typeEnum;
     this.parentTypeEnum = parentTypeEnum;
-    this.matcher = matcher;
+    this.typeObject = typeObject;
+    this.internalClassName = internalClassName;
   }
 }
 immutable PrimitiveTypeDefinition[] primitiveTypes =
   [
    // NOTE: the anything type must have itself as it's parent
-   PrimitiveTypeDefinition("anything" , PrimitiveTypeEnum.anything , PrimitiveTypeEnum.anything, Matcher.anything),
-   PrimitiveTypeDefinition("void"     , PrimitiveTypeEnum.void_    , PrimitiveTypeEnum.anything),
-   PrimitiveTypeDefinition("constructBreak", PrimitiveTypeEnum.constructBreak, PrimitiveTypeEnum.anything, Matcher.constructBreak),
-   PrimitiveTypeDefinition("nullable" , PrimitiveTypeEnum.nullable , PrimitiveTypeEnum.anything),
+   PrimitiveTypeDefinition("anything" , PrimitiveTypeEnum.anything , PrimitiveTypeEnum.anything, PrimitiveType.anything, "ConstructObject"),
+   PrimitiveTypeDefinition("predicate", PrimitiveTypeEnum.predicate, PrimitiveTypeEnum.anything, PrimitiveType.predicate, "ConstructPredicate"),
+   PrimitiveTypeDefinition("nullable" , PrimitiveTypeEnum.nullable , PrimitiveTypeEnum.predicate, PrimitiveType.nullable, "ConstructNullable"),
+   //PrimitiveTypeDefinition("void"     , PrimitiveTypeEnum.void_    , PrimitiveTypeEnum.anything),
+   PrimitiveTypeDefinition("comment"  , PrimitiveTypeEnum.comment  , PrimitiveTypeEnum.anything),
 
-   PrimitiveTypeDefinition("type"     , PrimitiveTypeEnum.type     , PrimitiveTypeEnum.anything, Matcher.type),
+   PrimitiveTypeDefinition("constructBreak", PrimitiveTypeEnum.constructBreak, PrimitiveTypeEnum.anything, PrimitiveType.constructBreak, "ObjectBreak"),
 
-   PrimitiveTypeDefinition("symbol"   , PrimitiveTypeEnum.symbol   , PrimitiveTypeEnum.anything, Matcher.symbol),
+   PrimitiveTypeDefinition("type"     , PrimitiveTypeEnum.type     , PrimitiveTypeEnum.anything, PrimitiveType.type    , "ConstructType"),
 
-   PrimitiveTypeDefinition("bool"     , PrimitiveTypeEnum.bool_    , PrimitiveTypeEnum.anything, Matcher.bool_),
+   PrimitiveTypeDefinition("symbol"   , PrimitiveTypeEnum.symbol   , PrimitiveTypeEnum.anything, PrimitiveType.symbol  , "ConstructSymbol"),
 
-   PrimitiveTypeDefinition("pointer"  , PrimitiveTypeEnum.pointer  , PrimitiveTypeEnum.nullable, Matcher.pointer),
-   PrimitiveTypeDefinition("number"   , PrimitiveTypeEnum.number   , PrimitiveTypeEnum.anything, Matcher.number),
-   PrimitiveTypeDefinition("integer"  , PrimitiveTypeEnum.integer_ , PrimitiveTypeEnum.number),
+   PrimitiveTypeDefinition("bool"     , PrimitiveTypeEnum.bool_    , PrimitiveTypeEnum.predicate, PrimitiveType.bool_   , "ConstructBool"),
+
+   PrimitiveTypeDefinition("pointer"  , PrimitiveTypeEnum.pointer  , PrimitiveTypeEnum.nullable, PrimitiveType.pointer , "ConstructPointer"),
+   PrimitiveTypeDefinition("number"   , PrimitiveTypeEnum.number   , PrimitiveTypeEnum.anything, PrimitiveType.number  , "ConstructNumber"),
+   PrimitiveTypeDefinition("integer"  , PrimitiveTypeEnum.integer_ , PrimitiveTypeEnum.number  ),
    PrimitiveTypeDefinition("signed"   , PrimitiveTypeEnum.signed   , PrimitiveTypeEnum.integer_),
    PrimitiveTypeDefinition("int"      , PrimitiveTypeEnum.int_     , PrimitiveTypeEnum.signed),
    PrimitiveTypeDefinition("byte"     , PrimitiveTypeEnum.byte_    , PrimitiveTypeEnum.signed),
    PrimitiveTypeDefinition("unsigned" , PrimitiveTypeEnum.unsigned_, PrimitiveTypeEnum.integer_),
-   PrimitiveTypeDefinition("uint"     , PrimitiveTypeEnum.uint_    , PrimitiveTypeEnum.unsigned_, Matcher.uint_),
+   PrimitiveTypeDefinition("uint"     , PrimitiveTypeEnum.uint_    , PrimitiveTypeEnum.unsigned_, PrimitiveType.uint_  , "ConstructUint"),
    PrimitiveTypeDefinition("ubyte"    , PrimitiveTypeEnum.ubyte_   , PrimitiveTypeEnum.unsigned_),
    PrimitiveTypeDefinition("uni"      , PrimitiveTypeEnum.uni      , PrimitiveTypeEnum.anything),
 
-   PrimitiveTypeDefinition("construct"     , PrimitiveTypeEnum.construct     , PrimitiveTypeEnum.nullable),
-   PrimitiveTypeDefinition("constructBlock", PrimitiveTypeEnum.constructBlock, PrimitiveTypeEnum.nullable, Matcher.block),
+   PrimitiveTypeDefinition("construct"     , PrimitiveTypeEnum.construct     , PrimitiveTypeEnum.anything, null, "ConstructDefinition"),
+   PrimitiveTypeDefinition("constructBlock", PrimitiveTypeEnum.constructBlock, PrimitiveTypeEnum.anything, PrimitiveType.constructBlock, "ConstructBlock"),
 
-   PrimitiveTypeDefinition("list"            , PrimitiveTypeEnum.list            , PrimitiveTypeEnum.anything, Matcher.list),
-   PrimitiveTypeDefinition("constructPattern", PrimitiveTypeEnum.constructPattern, PrimitiveTypeEnum.list),
-   PrimitiveTypeDefinition("class"           , PrimitiveTypeEnum.class_          , PrimitiveTypeEnum.nullable, Matcher.class_),
+   PrimitiveTypeDefinition("list"            , PrimitiveTypeEnum.list        , PrimitiveTypeEnum.anything, PrimitiveType.list, "ConstructList"),
+   // A constructPattern is a type and a list
+   PrimitiveTypeDefinition("constructPattern", PrimitiveTypeEnum.constructPattern, PrimitiveTypeEnum.type, null, "ConstructPattern"),
+   PrimitiveTypeDefinition("class"           , PrimitiveTypeEnum.class_          , PrimitiveTypeEnum.nullable, PrimitiveType.class_, "ConstructClass"),
 
    PrimitiveTypeDefinition("array"    , PrimitiveTypeEnum.array    , PrimitiveTypeEnum.nullable),
-   PrimitiveTypeDefinition("string"   , PrimitiveTypeEnum.string   , PrimitiveTypeEnum.array, Matcher.string_),
-   PrimitiveTypeDefinition("ascii"    , PrimitiveTypeEnum.ascii    , PrimitiveTypeEnum.string),
-   PrimitiveTypeDefinition("unicode"  , PrimitiveTypeEnum.unicode  , PrimitiveTypeEnum.string),
-   PrimitiveTypeDefinition("utf8"     , PrimitiveTypeEnum.utf8     , PrimitiveTypeEnum.unicode),
+   PrimitiveTypeDefinition("string"   , PrimitiveTypeEnum.string_   , PrimitiveTypeEnum.array, PrimitiveType.string_, "ConstructString"),
+   PrimitiveTypeDefinition("ascii"    , PrimitiveTypeEnum.ascii    , PrimitiveTypeEnum.string_),
+   PrimitiveTypeDefinition("unicode"  , PrimitiveTypeEnum.unicode  , PrimitiveTypeEnum.string_),
+   PrimitiveTypeDefinition("utf8"     , PrimitiveTypeEnum.utf8     , PrimitiveTypeEnum.unicode, PrimitiveType.utf8, "ConstructUtf8"),
 
    PrimitiveTypeDefinition("lengthArray"  , PrimitiveTypeEnum.lengthArray    , PrimitiveTypeEnum.array),
    PrimitiveTypeDefinition("lengthAscii"  , PrimitiveTypeEnum.lengthAscii    , PrimitiveTypeEnum.lengthArray),
@@ -124,7 +138,7 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
    PrimitiveTypeDefinition("limitUtf8"   , PrimitiveTypeEnum.limitUtf8     , PrimitiveTypeEnum.limitUnicode),
    ];
 
-PrimitiveTypeDefinition definition(PrimitiveTypeEnum typeEnum) pure
+PrimitiveTypeDefinition definition(PrimitiveTypeEnum typeEnum) pure nothrow @nogc @safe
 {
   return primitiveTypes[cast(size_t)typeEnum];
 }
@@ -178,13 +192,13 @@ unittest
   }
 }
 
-inout(T) tryAs(T)(inout(ISymbolObject) obj)
+inout(T) tryAs(T)(inout(ConstructObject) obj)
 {
   mixin(formattedString!(generateItemCode!(", atFirst ? \"\" : \"else \", item, item", const(string)[]))
         (ConstructClasses, "%sstatic if( is ( T == %s ) ) { return obj.tryAs%s; }\n")~
-        q{else static assert(0, "the as(ISymbolObject) template does not support type: "~T.staticTypeName);});
+        q{else static assert(0, "the as(ConstructObject) template does not support type: "~T.stringof);});
 }
-inout(T) enforceAs(T)(inout(ISymbolObject) obj)
+inout(T) enforceAs(T)(inout(ConstructObject) obj)
 {
   auto value = tryAs!T(obj);
   if(!value) {
@@ -193,23 +207,20 @@ inout(T) enforceAs(T)(inout(ISymbolObject) obj)
   return value;
 }
 
-interface ISymbolObject
+//immutable defaultConstructMode =
+class ConstructMode : ConstructObject
 {
-  @property size_t getLineNumber() const pure;
-
-  mixin(formattedString!(generateItemCode!(", item, item", const(string)[]))
-        (ConstructClasses, "@property inout(%s) tryAs%s() inout pure;\n"));
-
-  @property string typeName() const pure;
-  bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const pure;
+  string sourceVar;
+  string resultVar;
+  const(ConstructBlock) handlerBlock;
+  this(size_t lineNumber, string sourceVar, string resultVar, ConstructBlock handlerBlock) pure
+  {
+    super(lineNumber);
+    this.sourceVar = sourceVar;
+    this.resultVar = resultVar;
+    this.handlerBlock = handlerBlock;
+  }
 }
-
-/*
-class ConstructMode : ISymbolObject
-{
-  
-}
-*/
 
 PrimitiveType create(PrimitiveTypeEnum typeEnum, size_t lineNumber)
 {
@@ -258,33 +269,42 @@ static class Precedence
   }
   */
 }
-interface IPrecedenceConsumer
+interface IConstructContext
 {
-  string getOperatorString() const;
+  bool hasOperatorPatterns() const;
+  string getConstructName() const;
 }
-class DefaultPrecedenceConsumer : IPrecedenceConsumer
+class NoConstructContext : IConstructContext
 {
-  static immutable instance = new immutable DefaultPrecedenceConsumer();
+  static immutable instance = new immutable NoConstructContext();
   private this() immutable pure nothrow @nogc @safe {}
-
-  string getOperatorString() const
+  bool hasOperatorPatterns() const { return false; }
+  string getConstructName() const
   {
     return null;
   }
 }
 
-struct OpParam
-{
-  string name;
-  immutable(Matcher) matcher;
-}
 alias ConstructHandler = const(ConstructObject) function
-  (ConstructProcessor* processor, const(ConstructDefinition) definition, const(ConstructSymbol) constructSymbol, const(ConstructObject)[] args);
+  (ConstructProcessor* processor, const(ConstructDefinition) definition, const(ConstructSymbol) constructSymbol,
+   const(PatternNode)[] patternNodes, const(ConstructObject)[] args);
 struct PatternHandler
 {
-  PatternNode[] patternNodes;
   ConstructHandler handler;
+  PatternNode[] patternNodes;
 }
+
+struct OpPatternHandlers
+{
+  ConstructType opType;
+  PatternHandler[] patternHandlers;
+}
+struct OpPatternTree
+{
+  ConstructType opType;
+  PatternTree!ConstructHandler patternTree;
+}
+
 enum ConstructAttribute {
   // If true, then the implementation code can reach outside the
   // construct to find symbols in the scope of the caller.
@@ -294,106 +314,127 @@ enum ConstructAttribute {
   addSymbolsToParentScope   = 1<<1,
 }
 alias ConstructAttributes = BitFlags!ConstructAttribute;
-class ConstructDefinition : ISymbolObject, IPrecedenceConsumer
+class ConstructDefinition : ConstructObject, IConstructContext
 {
   string name;
-  const size_t lineNumber;
   const(char)[] filename;
   const ConstructAttributes attributes;
   const ConstructType evalTo;
 
-  immutable(OpParam) opParam;
-
-  this(string name, size_t lineNumber, const(char)[] filename, ConstructAttributes attributes, immutable(OpParam) opParam, ConstructType evalTo) pure
+  this(string name, size_t lineNumber, const(char)[] filename, ConstructAttributes attributes, ConstructType evalTo) pure
   {
+    super(lineNumber);
     this.name = name;
-    this.lineNumber = lineNumber;
     this.filename = filename;
     this.attributes = attributes;
-    this.opParam = opParam;
     this.evalTo = evalTo;
   }
-  this(string name, size_t lineNumber, string filename, ConstructAttributes attributes, immutable(OpParam) opParam, immutable ConstructType evalTo) pure immutable
+  this(string name, size_t lineNumber, string filename, ConstructAttributes attributes, immutable ConstructType evalTo) pure immutable
   {
+    super(lineNumber);
     this.name = name;
-    this.lineNumber = 0;
     this.filename = filename;
     this.attributes = attributes;
-    this.opParam = opParam;
     this.evalTo = evalTo;
   }
 
-  enum staticTypeName = "construct";
-  @property
-  string typeName() const pure { return staticTypeName; }
+  mixin finalTypeNameMembers!"construct";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.construct);
 
-  string getOperatorString() const
+  @property abstract bool hasOperatorPatterns() const;
+  string getConstructName() const
   {
-    return (opParam.matcher is null) ? null : name;
+    return name;
   }
 
-  @property final size_t getLineNumber() const pure { return lineNumber; }
+  @property abstract inout(NoPatternConstruct) tryAsNoPatternConstruct() inout pure nothrow @nogc @safe;
 
-
-  
-  @property final inout(ConstructObject) tryAsConstructObject() inout pure
-  {
-    throw imp("ConstructDefinition tryAsConstructObject");
-  }
   @property
-  final inout(ConstructDefinition) tryAsConstructDefinition() inout pure
+  final override inout(ConstructDefinition) tryAsConstructDefinition() inout pure
   {
     return this;
   }
-  mixin(formattedString!(generateItemCode!(", item, item", const(string)[]))
-        (ConstructClasses.filter("ConstructObject", "ConstructDefinition"),
-         "@property final inout(%s) tryAs%s() inout pure { return null; }\n"));
-
-  bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const pure
+  mixin virtualEqualsMember!ConstructDefinition;
+  final bool typedEquals(const(ConstructDefinition) other) const pure
   {
     throw imp("ConstructDefinition equals");
   }
 
-  abstract const(PatternHandler)[] getPatternHandlers() const;
-  abstract const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-						   const(ConstructObject) opParam, const(ConstructObject)[] objects, size_t* index) const;
+  abstract const(PatternHandler)[] getPatternHandlers(const(ConstructObject) op) const;
 
-  const(ConstructObject) process2(ConstructProcessor* processor,
-      const(ConstructSymbol) constructSymbol, const(ConstructObject)[] args) const
+  final override void toString(scope void delegate(const(char)[]) sink) const
   {
-    throw imp(format("construct '%s', process2", constructSymbol.value));
+    sink("[construct-definition, toString not implemented]");
+    //throw imp("ConstructDefinition.toString");
   }
 }
 class NoPatternConstruct : ConstructDefinition
 {
   this(string name, size_t lineNumber, string filename, ConstructAttributes attributes, immutable ConstructType evalTo) pure immutable
   {
-    super(name, lineNumber, filename, attributes, OpParam(), evalTo);
+    super(name, lineNumber, filename, attributes, evalTo);
   }
-  final override const(PatternHandler)[] getPatternHandlers() const { return null; }
+  @property final override inout(NoPatternConstruct) tryAsNoPatternConstruct() inout pure nothrow @nogc @safe { return this; }
+  @property final override bool hasOperatorPatterns() const { return false; }
+  final override const(PatternHandler)[] getPatternHandlers(const(ConstructObject) op) const { return null; }
+  abstract const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+						   const(ConstructObject) opParam, const(ConstructObject)[] objects, size_t* index) const;
 }
+
+enum TypeMatch {
+  not, exact, subtype,
+}
+
 class PatternConstructDefinition : ConstructDefinition
 {
-  immutable(PatternHandler)[] patternHandlers;
-  this(string name, immutable(OpParam) opParam, immutable(PatternHandler)[] patternHandlers, size_t lineNumber,
-       string filename, ConstructAttributes attributes, immutable ConstructType evalTo) pure immutable
+  immutable(PatternHandler)[] noOpPatternHandlers;
+  immutable(OpPatternHandlers)[] opPatternHandlers;
+  this(string name, immutable(PatternHandler)[] noOpPatternHandlers,
+       immutable(OpPatternHandlers)[] opPatternHandlers, size_t lineNumber,
+       string filename, ConstructAttributes attributes, immutable ConstructType evalTo) immutable pure
   {
-    super(name, lineNumber, filename, attributes, opParam, evalTo);
-    this.patternHandlers = patternHandlers;
+    super(name, lineNumber, filename, attributes, evalTo);
+    this.noOpPatternHandlers = noOpPatternHandlers;
+    this.opPatternHandlers = opPatternHandlers;
   }
-  final override const(PatternHandler)[] getPatternHandlers() const { return patternHandlers; }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
-							 const(ConstructObject) opParam, const(ConstructObject)[] objects, size_t* index) const
+  @property final override inout(NoPatternConstruct) tryAsNoPatternConstruct() inout pure nothrow @nogc @safe { return null; }
+  @property final override bool hasOperatorPatterns() const { return opPatternHandlers !is null; }
+  final override const(PatternHandler)[] getPatternHandlers(const(ConstructObject) op) const
   {
-    throw new Exception("cannot call processNoPattern on a PatternConstructDefinition");
+    if(!op) {
+      return noOpPatternHandlers;
+    }
+    if(opPatternHandlers.length == 0) {
+      return null;
+    }
+
+    //
+    // Find the best match for the operator object
+    //
+    OpPatternHandlers bestMatch = OpPatternHandlers(null, null);
+    foreach(opPatternHandler; opPatternHandlers) {
+      final switch(opPatternHandler.opType.matchValue(op)) {
+      case TypeMatch.not:
+        break;
+      case TypeMatch.exact:
+        return opPatternHandler.patternHandlers;
+      case TypeMatch.subtype:
+        if(bestMatch.opType !is null) {
+          throw imp("the operator object is a sub type for multiple patterns, need to implement code to select the best match");
+        }
+        bestMatch = opPatternHandler.unconst;
+        break;
+      }
+    }
+    return bestMatch.patternHandlers;
   }
 }
 class InternalPatternConstructDefinition : PatternConstructDefinition
 {
-  this(string name, immutable(OpParam) opParam, immutable(PatternHandler)[] patternHandlers,
+  this(string name, immutable(PatternHandler)[] noOpPatternHandlers, immutable(OpPatternHandlers)[] opPatternHandlers,
        ConstructAttributes attributes, immutable ConstructType evalTo, LineNumber lineNumber = __LINE__, string filename = __FILE__) pure immutable
   {
-    super(name, opParam, patternHandlers, lineNumber, filename, attributes, evalTo);
+    super(name, noOpPatternHandlers, opPatternHandlers, lineNumber, filename, attributes, evalTo);
   }
 }
 
@@ -404,50 +445,247 @@ abstract class ConstructType : ConstructObject
     super(lineNumber);
   }
 
-  enum staticTypeName = "type";
-  string typeName() const pure { return staticTypeName; }
+  mixin virtualTypeNameMembers!"type";
+  mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.type);
 
-  enum primitiveTypeEnum = PrimitiveTypeEnum.type;
-  @property final override PrimitiveTypeEnum primitiveType() pure const { return primitiveTypeEnum; }
+  @property abstract bool isAnySymbolType() const pure;
+  @property abstract string tryAsKeyword() const pure;
 
-  enum processorValueType = "ConstructType";
-  enum processorOptionalValueType = "ConstructType";
+  // Write the construct code that creates this type inside a pattern
+  abstract void writePattern(PureStringSink sink) const;
+  abstract void writeInternalFactoryCode(PureStringSink sink) const;
+
+  @property abstract string internalValueClassIfRequired() const pure;
+  @property abstract string internalValueClassIfOptional() const pure;
 
   @property abstract PrimitiveTypeEnum asPrimitive() const pure;
   @property final override inout(ConstructType) tryAsConstructType() inout { return this; }
 
-  @property abstract immutable(Matcher) matcher() const pure;
+  abstract bool supportsValue(const(ConstructObject) obj) const pure;
+  abstract TypeMatch matchValue(const(ConstructObject) obj) const;
 }
 class PrimitiveType : ConstructType
 {
   PrimitiveTypeEnum typeEnum;
-  this(size_t lineNumber, PrimitiveTypeEnum typeEnum) pure
+  private this(size_t lineNumber, PrimitiveTypeEnum typeEnum) pure
   {
     super(lineNumber);
     this.typeEnum = typeEnum;
   }
+
+  @property final override bool isAnySymbolType() const pure
+  {
+    return typeEnum == PrimitiveTypeEnum.symbol;
+  }
+  @property final override string tryAsKeyword() const pure { return null; }
+  final override void writePattern(PureStringSink sink) const
+  {
+    // Every primitive type should be in the symbol table
+    // with their name mapped to it
+    sink(typeEnum.definition.name);
+  }
+  final override void writeInternalFactoryCode(PureStringSink sink) const
+  {
+    sink("PrimitiveType.");
+    sink(typeEnum.to!string);
+  }
+  @property final override string internalValueClassIfRequired() const pure
+  {
+    auto name = typeEnum.definition().internalClassName;
+    if(!name) {
+      throw imp(format("type enum '%s' has no internalClassName configured", typeEnum));
+    }
+    return name;
+  }
+  @property final override string internalValueClassIfOptional() const pure
+  {
+    auto name = typeEnum.definition().internalClassName;
+    if(!name) {
+      throw imp(format("type enum '%s' has no internalClassName configured", typeEnum));
+    }
+    return name;
+  }
+
   @property final override PrimitiveTypeEnum asPrimitive() const pure { return typeEnum; }
+
+  final override bool supportsValue(const(ConstructObject) obj) const pure
+  {
+    return obj.primitiveTypeEnum.canBe(typeEnum);
+  }
+  final override TypeMatch matchValue(const(ConstructObject) obj) const
+  {
+    if(obj.primitiveTypeEnum == typeEnum) {
+      return TypeMatch.exact;
+    }
+    if(obj.primitiveTypeEnum.canBe(typeEnum)) {
+      return TypeMatch.subtype;
+    }
+    return TypeMatch.not;
+  }
   override void toString(scope void delegate(const(char)[]) sink) const
   {
     typeEnum.to!string;
   }
-  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const pure
+  mixin virtualEqualsMember!PrimitiveType;
+  final bool typedEquals(const(PrimitiveType) other) const pure
   {
-    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
-      return false;
-    }
-    auto other = cast(PrimitiveType)otherObj;
     return other && this.typeEnum == other.typeEnum;
   }
-  @property override immutable(Matcher) matcher() const pure
+
+  static immutable predicate      = new PrimitiveType(0, PrimitiveTypeEnum.predicate);
+  static immutable bool_          = new PrimitiveType(0, PrimitiveTypeEnum.bool_);
+  static immutable number         = new PrimitiveType(0, PrimitiveTypeEnum.number);
+  static immutable uint_          = new PrimitiveType(0, PrimitiveTypeEnum.uint_);
+  static immutable string_        = new PrimitiveType(0, PrimitiveTypeEnum.string_);
+  static immutable utf8           = new PrimitiveType(0, PrimitiveTypeEnum.utf8);
+  static immutable symbol         = new PrimitiveType(0, PrimitiveTypeEnum.symbol);
+  static immutable anything       = new PrimitiveType(0, PrimitiveTypeEnum.anything);
+  static immutable nullable       = new PrimitiveType(0, PrimitiveTypeEnum.nullable);
+  static immutable type           = new PrimitiveType(0, PrimitiveTypeEnum.type);
+  static immutable constructBlock = new PrimitiveType(0, PrimitiveTypeEnum.constructBlock);
+  static immutable pointer        = new PrimitiveType(0, PrimitiveTypeEnum.pointer);
+  static immutable list           = new PrimitiveType(0, PrimitiveTypeEnum.list);
+  static immutable class_         = new PrimitiveType(0, PrimitiveTypeEnum.class_);
+  static immutable constructBreak = new PrimitiveType(0, PrimitiveTypeEnum.constructBreak);
+}
+
+class ConstructPredicate : ConstructObject
+{
+  this(size_t lineNumber) pure
   {
-    auto matcher = typeEnum.definition.matcher;
-    if(!matcher) {
-      throw imp(format("matcher for '%s' is not configured yet", typeEnum.definition.name));
-    }
-    return matcher;
+    super(lineNumber);
+  }
+
+  mixin virtualTypeNameMembers!"predicate";
+  mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.predicate);
+
+  @property final override inout(ConstructPredicate) tryAsConstructPredicate() inout pure { return this; }
+  @property abstract bool isTrue() const;
+}
+
+class ConstructNullable : ConstructPredicate
+{
+  this(size_t lineNumber) pure
+  {
+    super(lineNumber);
+  }
+
+  mixin virtualTypeNameMembers!"nullable";
+  mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.nullable);
+
+  @property final override inout(ConstructNullable) tryAsConstructNullable() inout pure { return this; }
+  @property final override bool isTrue() const { return !isNull; }
+  @property abstract bool isNull() const;
+}
+
+class KeywordType : ConstructType
+{
+  string keyword;
+  this(size_t lineNumber, string keyword) inout pure
+  {
+    super(lineNumber);
+    // TODO: I could validate that the keywors is a valid symbol,
+    //       or use another constructor that passes in a symbol that's
+    //       already been verified to be valid
+    this.keyword = keyword;
+  }
+  @property final override bool isAnySymbolType() const pure { return false; }
+  @property final override string tryAsKeyword() const pure { return keyword; }
+  final override void writePattern(PureStringSink sink) const
+  {
+    // A keyword type will be selected by the pattern compiler
+    // if a string is used for the pattern type
+    formattedWrite(sink, "\"%s\"", keyword);
+
+    // NOTE: if I decide to keep the 'symbolString syntax, I could use that instead
+  }
+  final override void writeInternalFactoryCode(PureStringSink sink) const
+  {
+    sink("new immutable KeywordType(\"");
+    sink(keyword);
+    sink("\")");
+  }
+  @property final override string internalValueClassIfRequired() const pure { return null;  }
+  @property final override string internalValueClassIfOptional() const pure { return "ConstructSymbol";  }
+
+  @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.symbol; }
+  final override bool supportsValue(const(ConstructObject) obj) const pure
+  {
+    auto symbol = obj.tryAsConstructSymbol;
+    return symbol && symbol.value == keyword;
+  }
+  final override TypeMatch matchValue(const(ConstructObject) obj) const
+  {
+    throw imp();
+  }
+
+  override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    sink("\"");
+    sink(keyword);
+    sink("\"");
+  }
+  mixin virtualEqualsMember!KeywordType;
+  final bool typedEquals(const(KeywordType) other) const pure
+  {
+    return this.keyword == other.keyword;
   }
 }
+class ConstructPattern : ConstructType
+{
+  immutable(ConstructType) opType;
+  const(PatternNode)[] patternNodes;
+  this(size_t lineNumber, Pattern pattern) pure
+  {
+    super(lineNumber);
+    this.opType = pattern.opType;
+    this.patternNodes = pattern.nodes;
+  }
+  this(size_t lineNumber, immutable(Pattern) pattern) pure immutable
+  {
+    super(lineNumber);
+    this.opType = pattern.opType;
+    this.patternNodes = pattern.nodes;
+  }
+
+  mixin finalTypeNameMembers!"pattern";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.constructPattern);
+
+  @property final override inout(ConstructPattern) tryAsConstructPattern() inout pure { return this; }
+
+  @property final override bool isAnySymbolType() const pure { return false; }
+  @property final override string tryAsKeyword() const pure { return null; }
+  final override void writePattern(PureStringSink sink) const
+  {
+    throw imp();
+  }
+  final override void writeInternalFactoryCode(PureStringSink sink) const
+  {
+    throw imp();
+  }
+  @property final override string internalValueClassIfRequired() const pure { return "ConstructPattern";  }
+  @property final override string internalValueClassIfOptional() const pure { return "ConstructPattern";  }
+
+  @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.constructPattern; }
+  final override bool supportsValue(const(ConstructObject) obj) const pure
+  {
+    throw imp();
+  }
+  final override TypeMatch matchValue(const(ConstructObject) obj) const
+  {
+    throw imp();
+  }
+  override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    sink("(a pattern...toString not implemented)");
+  }
+  mixin virtualEqualsMember!ConstructPattern;
+  final bool typedEquals(const(ConstructPattern) other) const pure
+  {
+    return this.opType.equals(other.opType) && this.patternNodes == other.patternNodes;
+  }
+}
+
 class ConstructClassDefinition : ConstructType
 {
   string name;
@@ -458,37 +696,41 @@ class ConstructClassDefinition : ConstructType
     this.name = name;
     this.scope_ = scope_;
   }
+  @property final override bool isAnySymbolType() const pure { return false; }
+  @property final override string tryAsKeyword() const pure { return null; }
+  final override void writePattern(PureStringSink sink) const
+  {
+    throw imp();
+  }
+  final override void writeInternalFactoryCode(PureStringSink sink) const
+  {
+    throw imp();
+  }
+  @property final override string internalValueClassIfRequired() const pure { return "ConstructClass";  }
+  @property final override string internalValueClassIfOptional() const pure { return "ConstructClass";  }
   @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.class_; }
   override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink(name);
   }
   @property final override inout(ConstructClassDefinition) tryAsConstructClassDefinition() inout pure { return this; }
-  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const pure
+
+  final override bool supportsValue(const(ConstructObject) obj) const pure
   {
-    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
-      return false;
-    }
-    auto other = cast(ConstructClassDefinition)otherObj;
-    return other && equals(cast(ConstructClassDefinition)otherObj);
+    throw imp();
   }
-  final bool equals(const(ConstructClassDefinition) other) const pure
+  final override TypeMatch matchValue(const(ConstructObject) obj) const
+  {
+    throw imp();
+  }
+
+  mixin virtualEqualsMember!ConstructClassDefinition;
+  final bool typedEquals(const(ConstructClassDefinition) other) const pure
   {
     return this.name == other.name;
   }
-  @property override immutable(Matcher) matcher() const pure
-  {
-    throw imp("ConstructClassDefinition.matcher()");
-    /*
-    auto matcher = typeEnum.definition.matcher;
-    if(!matcher) {
-      throw imp(format("matcher for '%s' is not configured yet", typeEnum.definition.name));
-    }
-    return matcher;
-    */
-  }
 }
-class ConstructClass : ConstructObject
+class ConstructClass : ConstructNullable
 {
   const(ConstructClassDefinition) classDef;
   this(size_t lineNumber, const(ConstructClassDefinition) classDef)
@@ -497,30 +739,24 @@ class ConstructClass : ConstructObject
     this.classDef = classDef;
   }
 
-  enum primiviteTypeEnum = PrimitiveTypeEnum.class_;
-  @property final override PrimitiveTypeEnum primitiveType() pure const { return primitiveTypeEnum; }
-
   enum staticTypeName = "class";
-  final string typeName() const pure { return classDef.name; }
+  final override string typeName() const pure { return classDef.name; }
+
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.class_);
 
   enum processorValueType = "ConstructClass";
   enum processorOptionalValueType = "ConstructClass";
 
   @property final override inout(ConstructClass) tryAsConstructClass() inout pure { return this; }
+  @property final override bool isNull() const { throw imp("ConstructClass.isNull"); }
+
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
     throw imp("ConstructClass.toString");
     //formattedWrite(sink, "%s", class);
   }
-  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const pure
-  {
-    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
-      return false;
-    }
-    auto other = cast(ConstructClass)otherObj;
-    return other && equals(other);
-  }
-  final bool equals(const(ConstructClass) otherClass) const pure
+  mixin virtualEqualsMember!ConstructClass;
+  final bool typedEquals(const(ConstructClass) other) const pure
   {
     throw imp("ConstructClass.equals");
   }
@@ -535,53 +771,83 @@ class ConstructTypedListType : ConstructType
     this.itemType = itemType;
   }
   enum staticTypeName = "list";
+  @property final override bool isAnySymbolType() const pure { return false; }
+  @property final override string tryAsKeyword() const pure { return null; }
+  final override void writePattern(PureStringSink sink) const
+  {
+    throw imp();
+  }
+  final override void writeInternalFactoryCode(PureStringSink sink) const
+  {
+    throw imp();
+  }
+  @property final override string internalValueClassIfRequired() const pure { return "ConstructList";  }
+  @property final override string internalValueClassIfOptional() const pure { return "ConstructList";  }
   @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.list; }
+  final override bool supportsValue(const(ConstructObject) obj) const pure
+  {
+    throw imp();
+  }
+  final override TypeMatch matchValue(const(ConstructObject) obj) const
+  {
+    throw imp();
+  }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink("listOf ");
     itemType.toString(sink);
   }
-  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const pure
+  mixin virtualEqualsMember!ConstructTypedListType;
+  final bool typedEquals(const(ConstructTypedListType) other) const pure
   {
-    auto other = cast(ConstructTypedListType)otherObj;
-    return other && equals(other, checkLineNumber);
-  }
-  final bool equals(const(ConstructTypedListType) other, bool checkLineNumber = true) const pure
-  {
-    if(checkLineNumber && lineNumber != other.getLineNumber) {
-      return false;
-    }
     return this.itemType.equals(other.itemType);
   }
-  @property override immutable(Matcher) matcher() const pure
-  {
-    return new immutable TypedListMatcher(cast(immutable(ConstructType))itemType);
-  }
 }
-class ConstructNull : ConstructObject
+class ConstructVoid : ConstructNullable
 {
   this(size_t lineNumber) pure
   {
     super(lineNumber);
   }
-  final string typeName() const pure
+
+  mixin finalTypeNameMembers!"nullable";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.nullable);
+
+  @property final override bool isNull() const { return true; }
+
+  override void toString(scope void delegate(const(char)[]) sink) const
   {
-    return "nullable";
+    sink("void");
   }
-  @property final override PrimitiveTypeEnum primitiveType() pure const { return PrimitiveTypeEnum.nullable; }
+  mixin virtualEqualsMember!ConstructVoid;
+  final bool typedEquals(const(ConstructVoid) other) const pure
+  {
+    return other !is null;
+  }
+}
+class ConstructNull : ConstructNullable
+{
+  this(size_t lineNumber) pure
+  {
+    super(lineNumber);
+  }
+
+  mixin finalTypeNameMembers!"nullable";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.nullable);
+
+  @property final override bool isNull() const { return true; }
+
   override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink("null");
   }
-  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const pure
+  mixin virtualEqualsMember!ConstructNull;
+  final bool typedEquals(const(ConstructNull) other) const pure
   {
-    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
-      return false;
-    }
-    return cast(ConstructNull)otherObj !is null;
+    return other !is null;
   }
 }
-class ConstructBool : ConstructObject
+class ConstructBool : ConstructPredicate
 {
   bool value;
   this(size_t lineNumber, bool value) pure
@@ -589,24 +855,22 @@ class ConstructBool : ConstructObject
     super(lineNumber);
     this.value = value;
   }
-  enum primitiveTypeEnum = PrimitiveTypeEnum.bool_;
-  enum staticTypeName = "bool";
-  final string typeName() const pure { return staticTypeName; }
+
+  mixin finalTypeNameMembers!"bool";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.bool_);
+
   enum processorValueType = "ConstructBool";
   enum processorOptionalValueType = "ConstructBool";
-  @property final override PrimitiveTypeEnum primitiveType() pure const { return primitiveTypeEnum; }
 
+  @property final override bool isTrue() const { return value; }
   @property final override inout(ConstructBool) tryAsConstructBool() inout pure { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink(value ? "true" : "false");
   }
-  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const pure
+  mixin virtualEqualsMember!ConstructBool;
+  final bool typedEquals(const(ConstructBool) other) const pure
   {
-    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
-      return false;
-    }
-    auto other = cast(ConstructBool)otherObj;
     return other && this.value == other.value;
   }
 }
@@ -618,16 +882,18 @@ class ConstructReturn : ConstructObject
     super(lineNumber);
     this.returnValue = returnValue;
   }
-  final string typeName() const pure { return "[return]"; }
-  @property final override PrimitiveTypeEnum primitiveType() pure const { return PrimitiveTypeEnum.void_; }
+
+  mixin finalTypeNameMembers!"[return]";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.anything);
+
   @property final override inout(ConstructReturn) tryAsConstructReturn() inout pure { return this; }
   override void toString(scope void delegate(const(char)[]) sink) const
   {
     sink("[return]");
   }
-  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const pure
+  final override bool equals(const(ConstructObject) otherObj, bool checkLineNumber = true) const pure
   {
-    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
+    if(checkLineNumber && lineNumber != otherObj.lineNumber) {
       return false;
     }
     return cast(ConstructReturn)otherObj !is null;
@@ -646,7 +912,7 @@ class ConstructNumber : ConstructObject
   abstract const(ConstructNumber) add(const(ConstructNumber) other) const pure;
   abstract const(ConstructNumber) multiply(const(ConstructNumber) other) const pure;
 }
-class ConstructPointer : ConstructObject
+class ConstructPointer : ConstructNullable
 {
   void* pointer;
   this(size_t lineNumber, void* pointer) pure
@@ -655,146 +921,39 @@ class ConstructPointer : ConstructObject
     this.pointer = pointer;
   }
 
-  enum primitiveTypeEnum = PrimitiveTypeEnum.pointer;
-  enum staticTypeName = "pointer";
-  final string typeName() const pure { return staticTypeName; }
+  mixin finalTypeNameMembers!"pointer";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.pointer);
+
   enum processorValueType = "ConstructPointer";
   enum processorOptionalValueType = "ConstructPointer";
-  @property final override PrimitiveTypeEnum primitiveType() pure const { return primitiveTypeEnum; }
 
   @property final override inout(ConstructPointer) tryAsConstructPointer() inout pure { return this; }
+  @property final override bool isNull() const { return pointer is null; }
+
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
     formattedWrite(sink, "%s", pointer);
   }
-  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const pure
+  mixin virtualEqualsMember!ConstructPointer;
+  final bool typedEquals(const(ConstructPointer) other) const pure
   {
-    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
-      return false;
-    }
-    auto other = cast(ConstructPointer)otherObj;
     return other && this.pointer == other.pointer;
   }
 }
-class ConstructString : ConstructObject
+class ConstructString : ConstructNullable
 {
   this(size_t lineNumber) pure
   {
     super(lineNumber);
   }
-  enum primitiveTypeEnum = PrimitiveTypeEnum.string;
   enum staticTypeName = "string";
-  @property final override inout(ConstructString) tryAsConstructString() inout pure { return this; }
+  enum staticPrimitiveTypeEnum = PrimitiveTypeEnum.string_;
+
   enum processorValueType = "ConstructString";
   enum processorOptionalValueType = "ConstructString";
 
-  abstract const(char)[] toUtf8() const pure;
+  @property final override inout(ConstructString) tryAsConstructString() inout pure { return this; }
+
+  abstract string toUtf8() const pure;
   abstract size_t stringByteLength(PrimitiveTypeEnum type) const pure;
 }
-class ConstructPattern : ConstructObject, Matcher
-{
-  const(PatternNode)[] patternNodes;
-  this(size_t lineNumber, const(PatternNode)[] patternNodes) pure
-  {
-    super(lineNumber);
-    this.patternNodes = patternNodes;
-  }
-  this(size_t lineNumber, immutable(PatternNode)[] patternNodes) pure immutable
-  {
-    super(lineNumber);
-    this.patternNodes = patternNodes;
-  }
-  final string typeName() const pure { return "pattern"; }
-  @property final override PrimitiveTypeEnum primitiveType() pure const { return PrimitiveTypeEnum.constructPattern; }
-  override void toString(scope void delegate(const(char)[]) sink) const
-  {
-    sink("<pattern.toString not implemented>");
-  }
-  @property final override inout(ConstructPattern) tryAsConstructPattern() inout pure { return this; }
-  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const pure
-  {
-    if(checkLineNumber && lineNumber != otherObj.getLineNumber) {
-      return false;
-    }
-    throw imp("ConstructPattern.equals");
-    //return cast(ConstructReturn)otherObj !is null;
-  }
-
-  //
-  // Matcher Implementation
-  //
-  @property override string codeText() const pure { return "(a sub pattern...codeText not implemented)"; }
-  @property final override bool isSymbolMatcher() const pure nothrow @nogc { return false; }
-  @property override string processorValueType() const pure
-  {
-    throw imp();
-    //    return T.processorValueType;
-  }
-  @property override string processorOptionalValueType() const pure
-  {
-    throw imp();
-    //    return T.processorOptionalValueType;
-  }
-  override bool match(const(ConstructObject) obj) const pure
-  {
-    throw imp();
-    //return obj.as!T() !is null;
-  }
-  final override void visit(IMatcherVisitHandler handler) const
-  {
-    handler.visit(this);
-  }
-}
-
-
-/*
-class ConstructTypedList(T) : ConstructObject
-{
-  const(T)[] items;
-  this(size_t lineNumber, const(T)[] items = null) pure
-  {
-    super(lineNumber);
-    this.items = items;
-  }
-  enum staticTypeName = "listOf "~T.staticTypeName;
-  final string typeName() const pure { return staticTypeName; }
-  enum processorValueType = "ConstructTypedList!("~T.stringof~")";
-  enum processorOptionalValueType = processorValueType;
-
-  @property final override PrimitiveTypeEnum primitiveType() pure const { return PrimitiveTypeEnum.list; }
-  @property final override inout(ConstructList) tryAsConstructList() inout pure { throw imp("ConstructTypedList.tryAsConstructList"); }
-  final override void toString(scope void delegate(const(char)[]) sink) const
-  {
-    sink("(");
-    if(items.length > 0) {
-      items[0].toString(sink);
-      foreach(item; items[1..$]) {
-	sink(" ");
-	item.toString(sink);
-      }
-    }
-    sink(")");
-  }
-
-  final bool equals(const(ISymbolObject) otherObj, bool checkLineNumber = true) const pure
-  {
-    auto other = cast(ConstructTypedList!T)otherObj;
-    return other && equals(other, checkLineNumber);
-  }
-  final bool equals(const(ConstructTypedList!T) other, bool checkLineNumber = true) const pure
-  {
-    if(checkLineNumber && lineNumber != other.lineNumber) {
-      return false;
-    }
-    if(items.length != other.items.length) {
-      return false;
-    }
-    foreach(i; 0..items.length) {
-      if(!items[i].equals(other.items[i])) {
-	return false;
-      }
-    }
-    return true;
-  }
-}
-*/
