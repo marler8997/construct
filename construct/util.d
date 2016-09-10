@@ -10,7 +10,7 @@ T unconst(T)(const(T) obj)
 {
   return cast(T)obj;
 }
-immutable(T) immutable_(T)(T obj)// if( !is(immutable T U == T U) )
+immutable(T) immutable_(T)(T obj)
 {
   return cast(immutable(T))obj;
 }

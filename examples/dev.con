@@ -22,7 +22,7 @@ message "Using the 'each' construct with numbers and strings:";
 each(1 "hello" 2 "again" 3) item { message "Item is: " item; }
 
 
-assert equals 2 add 1 1
+assert 2 == 1 + 1
 
 // TODO: joins the given strings
 defcon join(strings listOf string) //returns=strings.type

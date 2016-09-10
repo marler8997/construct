@@ -10,7 +10,7 @@ defcon item (name symbol,
 
 
 item DefaultValue "for optional pattern nodes, there should be a way to specify a default value"
-item OptionalValue "I need to come up with semantics for optional values that aren't specified.  For nullable types, the default value (when the value isn't specified) could be null.  For non-nullable types, they could be wrapped in a tagged struct, that specifies whether the value is present or not.  struct OptionalValue { bool present; T value; }"
+item OptionalValue "I need to come up with semantics for optional values that aren't specified.  For nullable types, the default value (when the value isn't specified) could be null.  For non-nullable types, they could be wrapped in a tagged struct, that specifies whether the value is present or not.  struct OptionalValue { bool present; T value; }...later...I think what I'm going to do is make every option node a tagged value, like the OptionalValue struct I previously mentioned, unless it has a default value.  If it has a default value, then the type will be left unchanged."
 
 
 item EmitAndProcess "Develop the concept of emitting constructs, and processing them."

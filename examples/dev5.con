@@ -1,0 +1,24 @@
+
+
+
+let aString "My String";
+message "aString is '" aString "'";
+
+set aString null;
+message "aString is '" aString "'";
+
+
+defcon optionalString(str optional string, _ constructBreak)
+{
+  if str != null {
+    message "is not null";
+  }
+  if str == null {
+    message "is null";
+  }
+  message "optional str is '" str "'";
+}
+
+optionalString "a";
+optionalString null;
+optionalString;

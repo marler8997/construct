@@ -19,6 +19,7 @@ enum PrimitiveTypeEnum {
 
   predicate,
   nullable,
+  optional,
   //void_,
   comment,
 
@@ -91,6 +92,7 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
    PrimitiveTypeDefinition("anything" , PrimitiveTypeEnum.anything , PrimitiveTypeEnum.anything, PrimitiveType.anything, "ConstructObject"),
    PrimitiveTypeDefinition("predicate", PrimitiveTypeEnum.predicate, PrimitiveTypeEnum.anything, PrimitiveType.predicate, "ConstructPredicate"),
    PrimitiveTypeDefinition("nullable" , PrimitiveTypeEnum.nullable , PrimitiveTypeEnum.predicate, PrimitiveType.nullable, "ConstructNullable"),
+   PrimitiveTypeDefinition("optional" , PrimitiveTypeEnum.optional , PrimitiveTypeEnum.anything, PrimitiveType.optional, "ConstructOptionalValue"),
    //PrimitiveTypeDefinition("void"     , PrimitiveTypeEnum.void_    , PrimitiveTypeEnum.anything),
    PrimitiveTypeDefinition("comment"  , PrimitiveTypeEnum.comment  , PrimitiveTypeEnum.anything),
 
@@ -541,41 +543,13 @@ class PrimitiveType : ConstructType
   static immutable symbol         = new PrimitiveType(0, PrimitiveTypeEnum.symbol);
   static immutable anything       = new PrimitiveType(0, PrimitiveTypeEnum.anything);
   static immutable nullable       = new PrimitiveType(0, PrimitiveTypeEnum.nullable);
+  static immutable optional       = new PrimitiveType(0, PrimitiveTypeEnum.optional);
   static immutable type           = new PrimitiveType(0, PrimitiveTypeEnum.type);
   static immutable constructBlock = new PrimitiveType(0, PrimitiveTypeEnum.constructBlock);
   static immutable pointer        = new PrimitiveType(0, PrimitiveTypeEnum.pointer);
   static immutable list           = new PrimitiveType(0, PrimitiveTypeEnum.list);
   static immutable class_         = new PrimitiveType(0, PrimitiveTypeEnum.class_);
   static immutable constructBreak = new PrimitiveType(0, PrimitiveTypeEnum.constructBreak);
-}
-
-class ConstructPredicate : ConstructObject
-{
-  this(size_t lineNumber) pure
-  {
-    super(lineNumber);
-  }
-
-  mixin virtualTypeNameMembers!"predicate";
-  mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.predicate);
-
-  @property final override inout(ConstructPredicate) tryAsConstructPredicate() inout pure { return this; }
-  @property abstract bool isTrue() const;
-}
-
-class ConstructNullable : ConstructPredicate
-{
-  this(size_t lineNumber) pure
-  {
-    super(lineNumber);
-  }
-
-  mixin virtualTypeNameMembers!"nullable";
-  mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.nullable);
-
-  @property final override inout(ConstructNullable) tryAsConstructNullable() inout pure { return this; }
-  @property final override bool isTrue() const { return !isNull; }
-  @property abstract bool isNull() const;
 }
 
 class KeywordType : ConstructType
@@ -730,38 +704,6 @@ class ConstructClassDefinition : ConstructType
     return this.name == other.name;
   }
 }
-class ConstructClass : ConstructNullable
-{
-  const(ConstructClassDefinition) classDef;
-  this(size_t lineNumber, const(ConstructClassDefinition) classDef)
-  {
-    super(lineNumber);
-    this.classDef = classDef;
-  }
-
-  enum staticTypeName = "class";
-  final override string typeName() const pure { return classDef.name; }
-
-  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.class_);
-
-  enum processorValueType = "ConstructClass";
-  enum processorOptionalValueType = "ConstructClass";
-
-  @property final override inout(ConstructClass) tryAsConstructClass() inout pure { return this; }
-  @property final override bool isNull() const { throw imp("ConstructClass.isNull"); }
-
-  final override void toString(scope void delegate(const(char)[]) sink) const
-  {
-    throw imp("ConstructClass.toString");
-    //formattedWrite(sink, "%s", class);
-  }
-  mixin virtualEqualsMember!ConstructClass;
-  final bool typedEquals(const(ConstructClass) other) const pure
-  {
-    throw imp("ConstructClass.equals");
-  }
-}
-
 
 class ConstructTypedListType : ConstructType
 {
@@ -825,6 +767,101 @@ class ConstructVoid : ConstructNullable
     return other !is null;
   }
 }
+
+
+class ConstructPredicate : ConstructObject
+{
+  this(size_t lineNumber) pure
+  {
+    super(lineNumber);
+  }
+
+  mixin virtualTypeNameMembers!"predicate";
+  mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.predicate);
+
+  @property final override inout(ConstructPredicate) tryAsConstructPredicate() inout pure { return this; }
+  @property abstract bool isTrue() const;
+}
+
+class ConstructNullable : ConstructPredicate
+{
+  this(size_t lineNumber) pure
+  {
+    super(lineNumber);
+  }
+
+  mixin virtualTypeNameMembers!"nullable";
+  mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.nullable);
+
+  @property final override inout(ConstructNullable) tryAsConstructNullable() inout pure { return this; }
+  @property final override bool isTrue() const { return !isNull; }
+  @property abstract bool isNull() const;
+}
+
+class ConstructClass : ConstructNullable
+{
+  const(ConstructClassDefinition) classDef;
+  this(size_t lineNumber, const(ConstructClassDefinition) classDef)
+  {
+    super(lineNumber);
+    this.classDef = classDef;
+  }
+
+  enum staticTypeName = "class";
+  final override string typeName() const pure { return classDef.name; }
+
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.class_);
+
+  enum processorValueType = "ConstructClass";
+  enum processorOptionalValueType = "ConstructClass";
+
+  @property final override inout(ConstructClass) tryAsConstructClass() inout pure { return this; }
+  @property final override bool isNull() const { throw imp("ConstructClass.isNull"); }
+
+  final override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    throw imp("ConstructClass.toString");
+    //formattedWrite(sink, "%s", class);
+  }
+  mixin virtualEqualsMember!ConstructClass;
+  final bool typedEquals(const(ConstructClass) other) const pure
+  {
+    throw imp("ConstructClass.equals");
+  }
+}
+
+// Note: I could make this a predicate, but maybe not..we'll see
+// Note: with duck types, after a program checks whether
+//       this value is present, it can automatically get typed
+//       to it's actual value.
+class ConstructOptionalValue : ConstructObject
+{
+  const(ConstructObject) value;
+  this(size_t lineNumber, const(ConstructObject) value) pure
+  {
+    super(lineNumber);
+    this.value = value;
+  }
+  
+  mixin finalTypeNameMembers!"optional";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.optional);
+
+  override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    if(value) {
+      sink("<no-value>");
+    } else {
+      sink("has-value: ");
+      value.toString(sink);
+    }
+  }
+  mixin virtualEqualsMember!ConstructOptionalValue;
+  final bool typedEquals(const(ConstructOptionalValue) other) const pure
+  {
+    return value.equals(other.value);
+  }
+}
+
 class ConstructNull : ConstructNullable
 {
   this(size_t lineNumber) pure

@@ -330,7 +330,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("set"), "(nam
   processor.setSymbol(name.lineNumber, name.value, value);
   return (break_ is null) ? value : null;
 }));
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("letSet"), "(name symbol, value, break_ optional constructBreak)", q{
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("letset"), "(name symbol, value, break_ optional constructBreak)", q{
   processor.letSetSymbol(name.value, value);
   return (break_ is null) ? value : null;
 }));
@@ -440,6 +440,9 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("*", "Multipl
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("==", "Equals"), "(this, right)", q{
       return new ConstructBool(constructSymbol.lineNumber, this_.equals(right, false));
+}));
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("!=", "NotEquals"), "(this, right)", q{
+      return new ConstructBool(constructSymbol.lineNumber, !this_.equals(right, false));
 }));
 
 

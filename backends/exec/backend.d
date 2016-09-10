@@ -65,6 +65,14 @@ const(ConstructObject) messageHandler(ConstructProcessor* processor,
         write("symbol:");
         write(symbol.value);
       } else {
+        {
+          auto nullable = object.tryAsConstructNullable;
+          if(nullable && nullable.isNull) {
+            write("<null>");
+            continue;
+          }
+        }
+        
         throw imp(format("message printing object of type %s", object.typeName));
       }
     }

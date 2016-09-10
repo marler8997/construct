@@ -238,7 +238,7 @@ struct ConstructProcessor
     addConstruct(tryConstructDefinition);
     addConstruct(LetConstruct.definition);
     addConstruct(SetConstruct.definition);
-    addConstruct(LetSetConstruct.definition);
+    addConstruct(LetsetConstruct.definition);
     addConstruct(IfConstruct.definition);
     addConstruct(NotConstruct.definition);
     addConstruct(foreachConstructDefinition);
@@ -257,6 +257,7 @@ struct ConstructProcessor
     addConstruct(PlusConstruct.definition);
     addConstruct(MultiplyConstruct.definition);
     addConstruct(EqualsConstruct.definition);
+    addConstruct(NotEqualsConstruct.definition);
 
     //
     // String Operations
