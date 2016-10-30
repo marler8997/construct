@@ -6,9 +6,9 @@ import construct.util;
 import construct.patterns    : PatternNode;
 import construct.backendCore : PrimitiveTypeEnum, ConstructDefinition, ConstructNumber,
                                ConstructPredicate, ConstructBool, ConstructNullable,
-                               ConstructType, definition, commonType, canBe,
+                               ConstructType, ConstructOptionalValue, definition, commonType, canBe,
                                ConstructPattern, ConstructClassDefinition, ConstructClass,
-                               ConstructReturn, ConstructPointer, ConstructString;
+                               ConstructReturn, ConstructPointer, ConstructArray, ConstructString;
 import construct.processor   : ConstructProcessor;
 
 enum ConstructClasses =
@@ -17,8 +17,10 @@ enum ConstructClasses =
    "ConstructType",
    "ConstructReturn",
    "ObjectBreak",
+   "ConstructOptionalValue",
    "ConstructNullable",
    "ConstructPointer",
+   "ConstructArray",
    "ConstructString",
    "ConstructUtf8",
    "ConstructSymbol",
@@ -223,7 +225,10 @@ class ConstructUtf8 : ConstructString
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.utf8);
 
   @property final override inout(ConstructUtf8) tryAsConstructUtf8() inout pure { return this; }
-  @property final override bool isNull() const { return value is null; }
+  @property override size_t length() const
+  {
+    return value.length;
+  }
 
   final override void toString(scope void delegate(const(char)[]) sink) const
   {

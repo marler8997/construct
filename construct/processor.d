@@ -203,6 +203,7 @@ struct ConstructProcessor
        ];
 
     addPrimitiveType(PrimitiveType.predicate);
+    addPrimitiveType(PrimitiveType.optionalValue);
     addPrimitiveType(PrimitiveType.bool_);
     addPrimitiveType(PrimitiveType.number);
     addPrimitiveType(PrimitiveType.uint_);
@@ -214,7 +215,7 @@ struct ConstructProcessor
     addPrimitiveType(PrimitiveType.constructBlock);
     addPrimitiveType(PrimitiveType.pointer);
     addPrimitiveType(PrimitiveType.list);
-    addPrimitiveType(PrimitiveType.class_);
+    //addPrimitiveType(PrimitiveType.class_);
     addPrimitiveType(PrimitiveType.constructBreak);
   }
   private void addPrimitiveType(const(PrimitiveType) primitiveType) pure
@@ -223,13 +224,20 @@ struct ConstructProcessor
   }
   private void addConstruct(const(ConstructDefinition) definition)
   {
-    currentScope.symbols[definition.name] = SymbolEntryList(definition.unconst);
+    auto entry = currentScope.symbols.get(definition.name, SymbolEntryList(null));
+    if(entry.first) {
+      throw imp(format("construct '%s' has multiple entries '%s' (type=%s) and '%s'", definition.name,
+		       entry.first, entry.first.typeName, definition));
+    } else {
+      currentScope.symbols[definition.name] = SymbolEntryList(definition.unconst);
+    }
   }
   void loadExtendedConstructs()
   {
     addConstruct(ImportConstruct.definition);
     //addConstruct(RelativeImportConstruct.definition);
     addConstruct(DefconConstruct.definition);
+    addConstruct(SymbolRefConstruct.definition);
     addConstruct(ToSymbolConstruct.definition);
     //currentScope.symbols["deftype"]   = SymbolEntryList(singleton!DeftypeConstructDefinition());
     addConstruct(ExecConstruct.definition);
@@ -253,7 +261,7 @@ struct ConstructProcessor
     //
     // Operators
     //
-    //addConstruct(DotConstruct.definition);
+    addConstruct(DotConstruct.definition);
     addConstruct(PlusConstruct.definition);
     addConstruct(MultiplyConstruct.definition);
     addConstruct(EqualsConstruct.definition);
@@ -674,6 +682,7 @@ struct ConstructProcessor
       return null;
     }
 
+    // todo: remove the 'sym' keyword
     if(symbol.value != "sym") {
       *index = nextIndex;
       return symbol;
@@ -699,94 +708,89 @@ struct ConstructProcessor
     throw semanticError(symbol.lineNumber, format("The 'sym' keyword expects an expression that evaluates to a symbol or string but evaulated to %s", result.typeName));
   }
 
+  // appendArg format:
+  // If a pattern node count type is:
+  //   case "one"      : appendArg with a ConstructObject, should NEVER be null
+  //   case "optional" : appendArg with ConstructObject, will be null if node value was not present
+  //   case "many" and "oneOrMore": appendArg with a count, and then that many arguments
   bool matchPattern(const(ConstructSymbol) constructSymbol, const(IConstructContext) constructContext,
                     const(PatternNode)[] patternNodes, const(ConstructObject)[] objects, size_t* index,
-                    void delegate(const(ConstructObject) arg) pure appendArg)
+                    void delegate(const(ObjectOrSize) arg) pure appendArg)
   {
   PATTERN_NODE_LOOP:
     foreach(nodeIndex,node; patternNodes) {
-      //logDev("  matching pattern node %d '%s' of type '%s'", nodeIndex, node.name, node);
-      if(*index >= objects.length) {
-
-        if(!node.countType.isOptional) {
-          //logDev("  did not match");
-          return false; // not a match
-          /*
-          throw semanticError(constructSymbol.lineNumber, format("construct '%s' did not get enough objects, expected at least one '%s' next", constructSymbol.value, node.matcher.codeText));
-          */
-        }
-        if(node.type.internalValueClassIfOptional && node.name && node.name != "_") {
-          appendArg(null);
-        }
-        continue;
-      }
-
-      // Handle the symbol case
-      if(node.type.isAnySymbolType) {
-
-        assert(node.countType == CountType.one);
-        auto symbol = tryConsumeSymbol(constructContext, objects, index);
-        if(symbol is null) {
-          return false; // not a match
-        }
+      //logDev("  matching pattern node %d '%s' of type '%s' (*index=%s, object.length=%s)", nodeIndex, node.name, node, *index, objects.length);
+      size_t nextIndex = *index;
+      if(nextIndex >= objects.length) {
         if(node.name && node.name != "_") {
-          appendArg(symbol);
-        }
-        continue;
-      }
-
-      // Handle the keyword case
-      if(auto keyword = node.type.tryAsKeyword) {
-        if(node.countType.isMultiple) {
-          throw imp("multiple keywords");
-        }
-
-        auto symbol = tryConsumeSymbol(constructContext, objects, index);
-        if(symbol is null || symbol.value != keyword) {
+          if(node.countType == CountType.optional) {
+            appendArg(ObjectOrSize(null));
+          } else if(node.countType == CountType.many) {
+            appendArg(ObjectOrSize(0));
+          } else {
+	    //logDev("  matchPattern: not a match 1");
+            return false;
+          }
+        } else {
           if(!node.countType.isOptional) {
-            return false; // not a match
+	    //logDev("  matchPattern: not a match 2");
+            return false;
           }
-          if(node.name && node.name != "_") {
-            appendArg(null);
-          }
-          continue;
-        }
-        if(node.name && node.name != "_") {
-          appendArg(symbol);
         }
         continue;
       }
 
-
-      //logDev("  consuming value...");
-      auto value = consumeValueAlreadyCheckedIndex(constructContext, objects, index);
-      if(value is null) {
-        throw imp("value is null");
+      ConstructObject value;
+      if(node.raw) {
+	value = objects[nextIndex++].unconst;
+	// handle the special macro construct
+	if(auto symbol = value.tryAsConstructSymbol) {
+	  if(symbol.value == "macro") {
+	    value = consumeValueAlreadyCheckedIndex(NoConstructContext.instance, objects, &nextIndex).unconst;
+	  }
+	}
+      } else {
+	value = consumeValueAlreadyCheckedIndex(constructContext, objects, &nextIndex).unconst;
       }
+      if(value is null) {
+	throw imp("value is null");
+      }
+
       // todo: handle returns
 
       if(!node.type.supportsValue(value)) {
-        if(!node.countType.isOptional) {
-          //logDev("  did not match");
-          return false; // not a match
-          //throw semanticError(constructSymbol.lineNumber, format("construct '%s' expected %s but got %s", constructSymbol.value, An(node.matcher.codeText), An(value.typeName)));
-        }
+        // NOTE: this block same as the *index >= objects.length block
         if(node.name && node.name != "_") {
-          appendArg(null);
+          if(node.countType == CountType.optional) {
+            appendArg(ObjectOrSize(null));
+          } else if(node.countType == CountType.many) {
+            appendArg(ObjectOrSize(0));
+          } else {
+            //logDev("  matchPattern: not a match 3 (node is '%s' object is '%s' (type=%s))", node, value, value.typeName);
+            return false; // not a match
+          }
+        } else {
+          if(!node.countType.isOptional) {
+            //logDev("  matchPattern: not a match 4");
+            return false; // not a match
+          }
         }
         continue PATTERN_NODE_LOOP;
       }
+
       //logDev("    matcher '%s' matched '%s'", node.matcher.codeText, value);
+      *index = nextIndex; // consume the object
 
       if(node.countType == CountType.one) {
-        if(node.name) {
-          appendArg(value);
+        if(node.name && node.name != "_") {
+          appendArg(ObjectOrSize(value));
         }
         continue PATTERN_NODE_LOOP;
       }
       if(node.countType == CountType.optional) {
-        if(node.type.internalValueClassIfOptional && node.name && node.name != "_") {
-          appendArg(value);
+        if(node.name && node.name != "_") {
+          //appendArg(new ConstructOptionalValue(value.lineNumber, value));
+          appendArg(ObjectOrSize(value));
         }
         continue PATTERN_NODE_LOOP;
       }
@@ -795,22 +799,37 @@ struct ConstructProcessor
     return true; // match
   }
 
+
+  struct PatternMatchStorage(size_t stackSize)
+  {
+    ObjectOrSize[stackSize] stackBuffer;
+    size_t totalSize;
+    void put(const(ObjectOrSize) objOrSize)
+    {
+      if(totalSize >= stackSize) {
+        throw imp();
+      }
+      stackBuffer[totalSize++] = objOrSize;
+    }
+    @property ObjectOrSize[] data()
+    {
+      return stackBuffer[0..totalSize];
+    }
+  }
+
   const(ConstructObject) processPatternConstruct(const(ConstructSymbol) constructSymbol, const(ConstructDefinition) con, bool hasOperatorObject,
                                                  const(ConstructObject) opParam, const(PatternHandler)[] patternHandlers, const(ConstructObject)[] objects, size_t* index)
 
   {
-    ConstructObject[256] constructArgs;
-    size_t constructArgCount = 0;
-    ConstructObject[256] constructObjectBuffer;
-    size_t constructObjectOffset = 0;
+    //PatternMatchStorage!512 args; // use 10 for development
+    PatternMatchStorage!10 args;
 
-    void appendArg(const(ConstructObject) arg) pure
-    {
-      constructArgs[constructArgCount++] = arg.unconst;
-    }
-
+    size_t appendStartIndex;
     if(hasOperatorObject) {
-      appendArg(opParam);
+      args.put(ObjectOrSize(opParam));
+      appendStartIndex = 1;
+    } else {
+      appendStartIndex = 0;
     }
     //logDev("construct '%s' is %s", constructSymbol.value, (con.opParam.matcher is null) ? "NULL" : "NOT NULL");
 
@@ -818,12 +837,9 @@ struct ConstructProcessor
     foreach(patternHandlerIndex, patternHandler; patternHandlers) {
       size_t nextIndex;
       nextIndex = *index;
-      constructArgCount = 0;
-      if(opParam) {
-	appendArg(opParam);
-      }
+      args.totalSize = appendStartIndex;
       //logDev("Attempting to match pattern %d for construct '%s'...", patternHandlerIndex, constructSymbol.value);
-      if(matchPattern(constructSymbol, con, patternHandler.patternNodes, objects, &nextIndex, &appendArg)) {
+      if(matchPattern(constructSymbol, con, patternHandler.patternNodes, objects, &nextIndex, &args.put)) {
 	matched = patternHandler.unconst;
         *index = nextIndex;
         break;
@@ -837,18 +853,20 @@ struct ConstructProcessor
     //
     // Print the arguments
     //
-    /*
-    logDev("Setup %d argument(s) for construct '%s':", constructArgCount, constructSymbol.value);
-    foreach(i, arg; constructArgs[0..constructArgCount]) {
-      if(arg) {
-	logDev("  [%s] %s (%s)", i, arg, arg.typeName);
-      } else {
-	logDev("  [%s] null", i);
+    {
+      /*
+      logDev("Setup %s objects to pass to construct '%s':", args.totalSize, constructSymbol.value);
+      foreach(obj; args.data) {
+	if(arg) {
+	  logDev("  [%s] %s (%s)", i, arg, arg.typeName);
+	} else {
+	  logDev("  [%s] null", i);
+	}
       }
+      */
     }
-    */
 
-    return matched.handler(&this, con, constructSymbol, matched.patternNodes, constructArgs[0..constructArgCount]);
+    return matched.handler(&this, con, constructSymbol, matched.patternNodes, args.data);
   }
 
   const(ConstructObject) consumeValue(const(IConstructContext) constructContext, const(ConstructSymbol) constructSymbol,
@@ -1065,27 +1083,45 @@ class FunctionConstructDefinition : NoPatternConstruct
 }
 const(ConstructObject) handleConstructWithBlock
 (ConstructProcessor* processor, const(ConstructDefinition) definition, const(ConstructSymbol) constructSymbol,
- const(PatternNode)[] patternNodes, const(ConstructObject)[] args)
+ const(PatternNode)[] patternNodes, const(ObjectOrSize)[] args)
 {
   auto withBlock = cast(ConstructWithBlockDefinition)definition;
   //auto patternNodes = withBlock.getPatternHandlers()[0].patternNodes;
 
   //logDev("pattern is '%s'", pattern);
-  if(args.length != patternNodes.length) {
-    throw new Exception(format("CodeBug: handleConstructWithBlock expected %s args for it's pattern, but got %s", patternNodes.length, args.length));
-  }
 
   processor.pushScope(withBlock.block.lineNumber, ScopeType.defcon, true);
   scope(exit) { processor.popScope(); }
 
-  foreach(i; 0..args.length) {
-    auto arg = args[i];
-    auto patternNode = patternNodes[i];
-
-    if(patternNode.name.length > 0 && patternNode.name != "_") {
-      processor.addSymbol(patternNode.name, arg);
-      //logDev("Added construct symbol '%s': %s", patternNode.name, arg);
+  // Prepare to call the construct by adding the objects that were setup
+  //  by the matchPattern function, to the symbol table.
+  size_t argIndex = 0;
+  foreach(patternNode; patternNodes) {
+    if(patternNode.name.length == 0 || patternNode.name == "_") {
+      continue;
     }
+    if(argIndex > args.length) {
+      throw new Exception("code bug: handleConstructWithBlock expected more arguments then were returned by matchPattern");
+    }
+    if(patternNode.countType == CountType.one) {
+      auto arg = args[argIndex++];
+      if(!arg.obj) {
+        throw new Exception("code bug: handleConstructWithBlock expects all patternNodes of count type 'one' to have a non-null object, but matchPattern set the object associated with the node to null");
+      }
+      processor.addSymbol(patternNode.name, arg.obj);
+    } else if(patternNode.countType == CountType.optional) {
+      auto arg = args[argIndex++];
+      if(arg.obj) {
+        processor.addSymbol(patternNode.name, new ConstructOptionalValue(arg.obj.lineNumber, arg.obj));
+      } else {
+        processor.addSymbol(patternNode.name, ConstructOptionalValue.Null);
+      }
+    } else {
+      throw imp();
+    }
+  }
+  if(argIndex < args.length) {
+    throw new Exception("code bug: handleConstructWithBlock did not use all the arguments that were returned by matchPattern");
   }
 
   return processor.processConstructImplementationBlock(withBlock.block.objects, withBlock);

@@ -50,7 +50,7 @@ expectFail {
   example6 true aSymbol // aSymbol does not exist
 }
 
-defcon example7(x bool, y symbol) { }
+defcon example7(x bool, y raw symbol) { }
 example7 true aSymbol
 //expectFail {
 //example7 true "string";
@@ -61,29 +61,25 @@ example7 true aSymbol
 // How to define a construct with a symbol reference variable
 //
 {
-  let mydefconname1 toSymbol adefcon1;
+  let mydefconname1 symbolRef adefcon1;
   let mydefconname2 toSymbol "adefcon2";
   let mydefconname3 toSymbol 'adefcon3; // fix syntax highlighting with end '
-  defcon sym mydefconname1() { }
-  defcon sym mydefconname2() { }
-  defcon sym mydefconname3() { }
-  defcon sym "adefcon4"() { }
-  defcon sym 'adefcon5() { } // fix syntax highlighting with end '
-  defcon sym toSymbol "adefcon6"() { }
-  defcon sym toSymbol 'adefcon7() { } // fix syntax highlighting with end '
+  defcon macro mydefconname1() { }
+  defcon macro mydefconname2() { }
+  defcon macro mydefconname3() { }
+  defcon macro toSymbol "adefcon4"() { }
+  defcon macro toSymbol 'adefcon5() { } // fix syntax highlighting with end '
 
   adefcon1
   adefcon2
   adefcon3
   adefcon4
   adefcon5
-  adefcon6
-  adefcon7
 }
 {
-  defcon defcon2 (name symbol) {
+  defcon defcon2 (name raw symbol) {
     addSymbolsToCaller {
-      defcon sym name() { }
+      defcon macro name() { }
     }
   }
   defcon2 myCoolDefcon

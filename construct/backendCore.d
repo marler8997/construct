@@ -19,8 +19,7 @@ enum PrimitiveTypeEnum {
 
   predicate,
   nullable,
-  optional,
-  //void_,
+  optionalValue,
   comment,
 
   constructBreak,
@@ -53,7 +52,7 @@ enum PrimitiveTypeEnum {
   ascii,
   unicode,
   utf8,
-
+  /*
   lengthArray,
   lengthAscii,
   lengthUnicode,
@@ -63,6 +62,7 @@ enum PrimitiveTypeEnum {
   limitAscii,
   limitUnicode,
   limitUtf8,
+  */
 }
 
 struct PrimitiveTypeDefinition
@@ -92,7 +92,7 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
    PrimitiveTypeDefinition("anything" , PrimitiveTypeEnum.anything , PrimitiveTypeEnum.anything, PrimitiveType.anything, "ConstructObject"),
    PrimitiveTypeDefinition("predicate", PrimitiveTypeEnum.predicate, PrimitiveTypeEnum.anything, PrimitiveType.predicate, "ConstructPredicate"),
    PrimitiveTypeDefinition("nullable" , PrimitiveTypeEnum.nullable , PrimitiveTypeEnum.predicate, PrimitiveType.nullable, "ConstructNullable"),
-   PrimitiveTypeDefinition("optional" , PrimitiveTypeEnum.optional , PrimitiveTypeEnum.anything, PrimitiveType.optional, "ConstructOptionalValue"),
+   PrimitiveTypeDefinition("optionalValue", PrimitiveTypeEnum.optionalValue, PrimitiveTypeEnum.anything, PrimitiveType.optionalValue, "ConstructOptionalValue"),
    //PrimitiveTypeDefinition("void"     , PrimitiveTypeEnum.void_    , PrimitiveTypeEnum.anything),
    PrimitiveTypeDefinition("comment"  , PrimitiveTypeEnum.comment  , PrimitiveTypeEnum.anything),
 
@@ -123,12 +123,39 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
    PrimitiveTypeDefinition("constructPattern", PrimitiveTypeEnum.constructPattern, PrimitiveTypeEnum.type, null, "ConstructPattern"),
    PrimitiveTypeDefinition("class"           , PrimitiveTypeEnum.class_          , PrimitiveTypeEnum.nullable, PrimitiveType.class_, "ConstructClass"),
 
-   PrimitiveTypeDefinition("array"    , PrimitiveTypeEnum.array    , PrimitiveTypeEnum.nullable),
-   PrimitiveTypeDefinition("string"   , PrimitiveTypeEnum.string_   , PrimitiveTypeEnum.array, PrimitiveType.string_, "ConstructString"),
+   // An array is a contiguous sequence of elements.
+   // An array is not the same as a pointer.
+   // A pointer can "point" to an array, but that would be "pointer to an array", not an "array" itself.
+   //
+   // Note: For now, an array will always carry with it, it's length. There may be a case to also have
+   //       an array type that does not know it's length. There may also be a 3rd type of array, which
+   //       is an array that has no length but has a terminating element (a special element that marks
+   //       the end of the array).  Then there could be a 4th type that both knows it's length and has
+   //       a terminating element.
+   //
+   //         1. array
+   //         2. arrayWithLength
+   //         3. arrayWithTerminatingElement
+   //         4. arrayWithLengthAndTerminatingElement
+   //
+   //       If it becomes clear that these cases should have their own types, I may need to reorganize the
+   //       types.
+   //
+   PrimitiveTypeDefinition("array"    , PrimitiveTypeEnum.array    , PrimitiveTypeEnum.anything),
+   // A string is defined as an array of characters.
+   // Note: see ConstructArray for the definition of an "array".
+   // The bit-width of each element in the string array is unsepcified.
+   // It may be 8 bits, or 16, or 32, or any other width.
+   //
+   // Example child types:
+   //   A ConstructUtf8 object is a ConstructString where the element size is
+   //   8 bits and the characters are encoded as UTF8.
+   //
+   PrimitiveTypeDefinition("string"   , PrimitiveTypeEnum.string_  , PrimitiveTypeEnum.array, PrimitiveType.string_, "ConstructString"),
    PrimitiveTypeDefinition("ascii"    , PrimitiveTypeEnum.ascii    , PrimitiveTypeEnum.string_),
    PrimitiveTypeDefinition("unicode"  , PrimitiveTypeEnum.unicode  , PrimitiveTypeEnum.string_),
    PrimitiveTypeDefinition("utf8"     , PrimitiveTypeEnum.utf8     , PrimitiveTypeEnum.unicode, PrimitiveType.utf8, "ConstructUtf8"),
-
+   /*
    PrimitiveTypeDefinition("lengthArray"  , PrimitiveTypeEnum.lengthArray    , PrimitiveTypeEnum.array),
    PrimitiveTypeDefinition("lengthAscii"  , PrimitiveTypeEnum.lengthAscii    , PrimitiveTypeEnum.lengthArray),
    PrimitiveTypeDefinition("lengthUnicode", PrimitiveTypeEnum.lengthUnicode  , PrimitiveTypeEnum.lengthArray),
@@ -138,6 +165,7 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
    PrimitiveTypeDefinition("limitAscii"  , PrimitiveTypeEnum.limitAscii    , PrimitiveTypeEnum.limitArray),
    PrimitiveTypeDefinition("limitUnicode", PrimitiveTypeEnum.limitUnicode  , PrimitiveTypeEnum.limitArray),
    PrimitiveTypeDefinition("limitUtf8"   , PrimitiveTypeEnum.limitUtf8     , PrimitiveTypeEnum.limitUnicode),
+   */
    ];
 
 PrimitiveTypeDefinition definition(PrimitiveTypeEnum typeEnum) pure nothrow @nogc @safe
@@ -287,9 +315,29 @@ class NoConstructContext : IConstructContext
   }
 }
 
+
+union ObjectOrSize
+{
+  const(ConstructObject) obj;
+  size_t size;
+  this(const(ConstructObject) obj)
+  {
+    this.obj = obj;
+  }
+  this(size_t size)
+  {
+    this.size = size;
+  }
+}
+// The ConstructHandler uses a format for it's ConstructObject[] args array based
+// on the pattern nodes. If a pattern node count type is:
+//   case "one"      : the matching ConstructObject should NEVER be null
+//   case "optional" : the matching ConstructObject will be NULL if the value was not present, and non-null if it was present
+//   case "many" and "oneOrMore": the number of values, followed by those values
 alias ConstructHandler = const(ConstructObject) function
   (ConstructProcessor* processor, const(ConstructDefinition) definition, const(ConstructSymbol) constructSymbol,
-   const(PatternNode)[] patternNodes, const(ConstructObject)[] args);
+   const(PatternNode)[] patternNodes, const(ObjectOrSize)[] args);
+
 struct PatternHandler
 {
   ConstructHandler handler;
@@ -450,15 +498,17 @@ abstract class ConstructType : ConstructObject
   mixin virtualTypeNameMembers!"type";
   mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.type);
 
-  @property abstract bool isAnySymbolType() const pure;
   @property abstract string tryAsKeyword() const pure;
 
   // Write the construct code that creates this type inside a pattern
   abstract void writePattern(PureStringSink sink) const;
   abstract void writeInternalFactoryCode(PureStringSink sink) const;
 
-  @property abstract string internalValueClassIfRequired() const pure;
-  @property abstract string internalValueClassIfOptional() const pure;
+  // TODO: now that I've added 'optional' as a type, I should
+  //       be able to make these into one function
+  //@property abstract string internalValueClassIfRequired() const pure;
+  //@property abstract string internalValueClassIfOptional() const pure;
+  @property abstract string internalValueClass() const pure;
 
   @property abstract PrimitiveTypeEnum asPrimitive() const pure;
   @property final override inout(ConstructType) tryAsConstructType() inout { return this; }
@@ -475,10 +525,6 @@ class PrimitiveType : ConstructType
     this.typeEnum = typeEnum;
   }
 
-  @property final override bool isAnySymbolType() const pure
-  {
-    return typeEnum == PrimitiveTypeEnum.symbol;
-  }
   @property final override string tryAsKeyword() const pure { return null; }
   final override void writePattern(PureStringSink sink) const
   {
@@ -491,6 +537,7 @@ class PrimitiveType : ConstructType
     sink("PrimitiveType.");
     sink(typeEnum.to!string);
   }
+  /*
   @property final override string internalValueClassIfRequired() const pure
   {
     auto name = typeEnum.definition().internalClassName;
@@ -500,6 +547,15 @@ class PrimitiveType : ConstructType
     return name;
   }
   @property final override string internalValueClassIfOptional() const pure
+  {
+    auto name = typeEnum.definition().internalClassName;
+    if(!name) {
+      throw imp(format("type enum '%s' has no internalClassName configured", typeEnum));
+    }
+    return name;
+  }
+  */
+  @property final override string internalValueClass() const pure
   {
     auto name = typeEnum.definition().internalClassName;
     if(!name) {
@@ -543,7 +599,7 @@ class PrimitiveType : ConstructType
   static immutable symbol         = new PrimitiveType(0, PrimitiveTypeEnum.symbol);
   static immutable anything       = new PrimitiveType(0, PrimitiveTypeEnum.anything);
   static immutable nullable       = new PrimitiveType(0, PrimitiveTypeEnum.nullable);
-  static immutable optional       = new PrimitiveType(0, PrimitiveTypeEnum.optional);
+  static immutable optionalValue  = new PrimitiveType(0, PrimitiveTypeEnum.optionalValue);
   static immutable type           = new PrimitiveType(0, PrimitiveTypeEnum.type);
   static immutable constructBlock = new PrimitiveType(0, PrimitiveTypeEnum.constructBlock);
   static immutable pointer        = new PrimitiveType(0, PrimitiveTypeEnum.pointer);
@@ -563,7 +619,6 @@ class KeywordType : ConstructType
     //       already been verified to be valid
     this.keyword = keyword;
   }
-  @property final override bool isAnySymbolType() const pure { return false; }
   @property final override string tryAsKeyword() const pure { return keyword; }
   final override void writePattern(PureStringSink sink) const
   {
@@ -579,8 +634,9 @@ class KeywordType : ConstructType
     sink(keyword);
     sink("\")");
   }
-  @property final override string internalValueClassIfRequired() const pure { return null;  }
-  @property final override string internalValueClassIfOptional() const pure { return "ConstructSymbol";  }
+  //@property final override string internalValueClassIfRequired() const pure { return null;  }
+  //@property final override string internalValueClassIfOptional() const pure { return "ConstructSymbol";  }
+  @property final override string internalValueClass() const pure { return "ConstructSymbol";  }
 
   @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.symbol; }
   final override bool supportsValue(const(ConstructObject) obj) const pure
@@ -627,7 +683,6 @@ class ConstructPattern : ConstructType
 
   @property final override inout(ConstructPattern) tryAsConstructPattern() inout pure { return this; }
 
-  @property final override bool isAnySymbolType() const pure { return false; }
   @property final override string tryAsKeyword() const pure { return null; }
   final override void writePattern(PureStringSink sink) const
   {
@@ -637,8 +692,9 @@ class ConstructPattern : ConstructType
   {
     throw imp();
   }
-  @property final override string internalValueClassIfRequired() const pure { return "ConstructPattern";  }
-  @property final override string internalValueClassIfOptional() const pure { return "ConstructPattern";  }
+  //@property final override string internalValueClassIfRequired() const pure { return "ConstructPattern";  }
+  //@property final override string internalValueClassIfOptional() const pure { return "ConstructPattern";  }
+  @property final override string internalValueClass() const pure { return "ConstructPattern";  }
 
   @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.constructPattern; }
   final override bool supportsValue(const(ConstructObject) obj) const pure
@@ -670,7 +726,6 @@ class ConstructClassDefinition : ConstructType
     this.name = name;
     this.scope_ = scope_;
   }
-  @property final override bool isAnySymbolType() const pure { return false; }
   @property final override string tryAsKeyword() const pure { return null; }
   final override void writePattern(PureStringSink sink) const
   {
@@ -680,8 +735,9 @@ class ConstructClassDefinition : ConstructType
   {
     throw imp();
   }
-  @property final override string internalValueClassIfRequired() const pure { return "ConstructClass";  }
-  @property final override string internalValueClassIfOptional() const pure { return "ConstructClass";  }
+  //@property final override string internalValueClassIfRequired() const pure { return "ConstructClass";  }
+  //@property final override string internalValueClassIfOptional() const pure { return "ConstructClass";  }
+  @property final override string internalValueClass() const pure { return "ConstructClass";  }
   @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.class_; }
   override void toString(scope void delegate(const(char)[]) sink) const
   {
@@ -713,7 +769,6 @@ class ConstructTypedListType : ConstructType
     this.itemType = itemType;
   }
   enum staticTypeName = "list";
-  @property final override bool isAnySymbolType() const pure { return false; }
   @property final override string tryAsKeyword() const pure { return null; }
   final override void writePattern(PureStringSink sink) const
   {
@@ -723,8 +778,9 @@ class ConstructTypedListType : ConstructType
   {
     throw imp();
   }
-  @property final override string internalValueClassIfRequired() const pure { return "ConstructList";  }
-  @property final override string internalValueClassIfOptional() const pure { return "ConstructList";  }
+  //@property final override string internalValueClassIfRequired() const pure { return "ConstructList";  }
+  //@property final override string internalValueClassIfOptional() const pure { return "ConstructList";  }
+  @property final override string internalValueClass() const pure { return "ConstructList";  }
   @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.list; }
   final override bool supportsValue(const(ConstructObject) obj) const pure
   {
@@ -745,6 +801,64 @@ class ConstructTypedListType : ConstructType
     return this.itemType.equals(other.itemType);
   }
 }
+class ConstructOptionalOf : ConstructType
+{
+  ConstructType ofType;
+  this(size_t lineNumber, ConstructType ofType) pure
+  {
+    super(lineNumber);
+    this.ofType = ofType;
+  }
+
+  @property final override string tryAsKeyword() const pure { return null; }
+  final override void writePattern(PureStringSink sink) const
+  {
+    sink("optional ");
+    ofType.writePattern(sink);
+  }
+  final override void writeInternalFactoryCode(PureStringSink sink) const
+  {
+    sink("new ConstructOptionalOf(0, ");
+    ofType.writeInternalFactoryCode(sink);
+    sink(")");
+  }
+  @property final override string internalValueClass() const pure
+  {
+    return "ConstructOptionalValue";
+  }
+
+  @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.optionalValue; }
+
+  final override bool supportsValue(const(ConstructObject) obj) const pure
+  {
+    throw imp();
+    //return obj.primitiveTypeEnum.canBe(typeEnum);
+  }
+  final override TypeMatch matchValue(const(ConstructObject) obj) const
+  {
+    throw imp();
+    /*
+    if(obj.primitiveTypeEnum == typeEnum) {
+      return TypeMatch.exact;
+    }
+    if(obj.primitiveTypeEnum.canBe(typeEnum)) {
+      return TypeMatch.subtype;
+    }
+    return TypeMatch.not;
+    */
+  }
+  override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    sink("optional ");
+    ofType.toString(sink);
+  }
+  mixin virtualEqualsMember!ConstructOptionalOf;
+  final bool typedEquals(const(ConstructOptionalOf) other) const pure
+  {
+    return other && this.ofType.equals(other.ofType);
+  }
+}
+
 class ConstructVoid : ConstructNullable
 {
   this(size_t lineNumber) pure
@@ -767,8 +881,6 @@ class ConstructVoid : ConstructNullable
     return other !is null;
   }
 }
-
-
 class ConstructPredicate : ConstructObject
 {
   this(size_t lineNumber) pure
@@ -831,20 +943,26 @@ class ConstructClass : ConstructNullable
 }
 
 // Note: I could make this a predicate, but maybe not..we'll see
-// Note: with duck types, after a program checks whether
+// Note: with dynamic types, after a program checks whether
 //       this value is present, it can automatically get typed
 //       to it's actual value.
 class ConstructOptionalValue : ConstructObject
 {
+  static immutable(ConstructOptionalValue) Null = new ConstructOptionalValue(0, null);
+
   const(ConstructObject) value;
   this(size_t lineNumber, const(ConstructObject) value) pure
   {
     super(lineNumber);
     this.value = value;
   }
-  
-  mixin finalTypeNameMembers!"optional";
-  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.optional);
+
+  // NOTE: type name will not be complete, adding a typeToString
+  //       abstract method would allow an easy way to get the type string
+  mixin finalTypeNameMembers!"optionalValue";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.optionalValue);
+
+  @property final override inout(ConstructOptionalValue) tryAsConstructOptionalValue() inout pure { return this; }
 
   override void toString(scope void delegate(const(char)[]) sink) const
   {
@@ -886,6 +1004,9 @@ class ConstructNull : ConstructNullable
 }
 class ConstructBool : ConstructPredicate
 {
+  static immutable(ConstructBool) false_ = new ConstructBool(0, false);
+  static immutable(ConstructBool) true_ = new ConstructBool(0, true);
+  
   bool value;
   this(size_t lineNumber, bool value) pure
   {
@@ -977,7 +1098,25 @@ class ConstructPointer : ConstructNullable
     return other && this.pointer == other.pointer;
   }
 }
-class ConstructString : ConstructNullable
+
+class ConstructArray : ConstructObject
+{
+  this(size_t lineNumber) pure
+  {
+    super(lineNumber);
+  }
+  enum staticTypeName = "array";
+  enum staticPrimitiveTypeEnum = PrimitiveTypeEnum.array;
+
+  enum processorValueType = "ConstructArray";
+  enum processorOptionalValueType = "ConstructArray";
+
+  //@property final override inout(ConstructString) tryAsConstructString() inout pure { return this; }
+
+  @property abstract size_t length() const;
+}
+
+class ConstructString : ConstructArray
 {
   this(size_t lineNumber) pure
   {

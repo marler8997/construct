@@ -19,7 +19,7 @@ import relative "../util"
   expectFail {
     matchAnything aSymbol
   }
-  matchAnything toSymbol aSymbol
+  matchAnything symbolRef aSymbol
 }
 {
   defcon oneString(s string)
@@ -29,7 +29,7 @@ import relative "../util"
   oneString "single string pattern"
 }
 {
-  defcon oneSymbol(s symbol)
+  defcon oneSymbol(s raw symbol)
   {
     message "matched symbol: " s;
   }
@@ -40,18 +40,16 @@ import relative "../util"
 //
 // Test Optional Patterns
 //
-/*
 {
   defcon optionalUint(num optional uint, _ constructBreak)
   {
-    if num.present {
+    if num.isPresent {
       message "optionalUint: " num;
     }
-    if not num.present {
+    if not num.isPresent {
       message "optionalUint: not present";
     }
   }
   optionalUint 3;
   optionalUint;
 }
-*/

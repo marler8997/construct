@@ -1,0 +1,19 @@
+import relative "../util"
+
+defcon matchRawString(value raw string)
+{
+  message "matchRawString: " value;
+}
+
+matchRawString "a string!"
+expectFail {
+  let x "another string";
+  matchRawString x
+}
+
+expectFail {
+  defcon rawNumberOp (this raw number)
+  {
+    message number " rawNumberOp";
+  }
+}

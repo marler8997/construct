@@ -40,18 +40,20 @@ bool isOptional(const CountType type) pure nothrow @nogc @safe
     type == CountType.many;
 }
 
+enum Raw { off, on }
 struct PatternNode
 {
   static auto null_()
   {
-    return immutable PatternNode(null, CountType.one, null);
+    return immutable PatternNode(null, CountType.one, Raw.off, null);
   }
 
   string name;
   CountType countType;
+  Raw raw;
   immutable(ConstructType) type;
 
-  this(string name, CountType countType, immutable(ConstructType) type) immutable pure
+  this(string name, CountType countType, Raw raw, immutable(ConstructType) type) immutable pure
   {
     assert(name.length > 0);
     if(type.tryAsConstructSymbol) {
@@ -61,9 +63,10 @@ struct PatternNode
     }
     this.name = name;
     this.countType = countType;
+    this.raw = raw;
     this.type = type;
   }
-  this(string name, CountType countType, immutable(ConstructType) type) pure
+  this(string name, CountType countType, Raw raw, immutable(ConstructType) type) pure
   {
     assert(name.length > 0);
     if(type.tryAsConstructSymbol) {
@@ -73,14 +76,16 @@ struct PatternNode
     }
     this.name = name;
     this.countType = countType;
+    this.raw = raw;
     this.type = type;
   }
   void toString(Sink)(Sink sink) const
   {
+    string rawString = raw ? "raw " : "";
     if(countType == CountType.one) {
-      formattedWrite(sink, "%s %s", name, type.typeEnum.definition.name);
+      formattedWrite(sink, "%s %s%s", name, rawString, type.typeEnum.definition.name);
     } else {
-      formattedWrite(sink, "%s %s %s", name, countType, type.typeEnum.definition.name);
+      formattedWrite(sink, "%s %s %s%s", name, countType, rawString, type.typeEnum.definition.name);
     }
   }
 }
@@ -139,6 +144,7 @@ struct PatternTree(T)
     this.dataOrBranches.branchPtr = branches.ptr;
 
     // Check that the branches are not ambiguous
+    /*
     foreach(branch; branches) {
       if(branch.nodes.length > 0) {
         if(branch.nodes[0].type.isAnySymbolType) {
@@ -146,6 +152,7 @@ struct PatternTree(T)
         }
       }
     }
+    */
   }
   this(immutable(PatternNode)[] nodes, T data) immutable
   {
@@ -249,16 +256,17 @@ void writeLinePrefix(Sink)(Sink sink, size_t level)
 //       the problem comes when you are combining multiple defcons
 //         letset <constructName> combineConstructs <constructName> construct ...
 //
+/*
 immutable setletPattern =
-  [immutable PatternNode("name", CountType.one, PrimitiveType.symbol),
-   immutable PatternNode("value", CountType.one, PrimitiveType.anything),
-   immutable PatternNode("break_", CountType.optional, PrimitiveType.constructBreak)];
+  [immutable PatternNode("name", CountType.one, Raw.on, PrimitiveType.symbol),
+   immutable PatternNode("value", CountType.one, Raw.off, PrimitiveType.anything),
+   immutable PatternNode("break_", CountType.optional, Raw.on, PrimitiveType.constructBreak)];
 
-immutable oneSymbolPattern =
-  [immutable PatternNode("symbol", CountType.one, PrimitiveType.symbol)];
+immutable oneRawSymbolPattern =
+  [immutable PatternNode("symbol", CountType.one, Raw.on, PrimitiveType.symbol)];
 immutable oneStringPattern =
-  [immutable PatternNode("string_", CountType.one, PrimitiveType.string_)];
-
+  [immutable PatternNode("string_", CountType.one, Raw.off, PrimitiveType.string_)];
+*/
 
 // Assumption: *itemIndex < items.length
 CountType getCountType(const(ConstructObject)[] items, size_t* itemIndex) pure
@@ -331,6 +339,7 @@ Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) c
     nodes ~= node;
   }
 
+  // TODO: add this variable and set it in Pattern
   ConstructType opType = null;
 
   for(size_t itemIndex = 0;;) {
@@ -353,11 +362,18 @@ Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) c
       if(nodes.length > 0) {
         throw processor.semanticError(patternList.lineNumber, "only the first pattern node can be named 'this'");
       }
-      // Get the type
       if(itemIndex >= patternList.items.length) {
         opType = PrimitiveType.anything.unconst;
         break;
       }
+
+      // Check for raw
+      if(auto symbol = patternList.items[itemIndex].tryAsConstructSymbol) {
+        if(symbol.value == "raw") {
+	  throw processor.semanticError(symbol.lineNumber, "the 'raw' modifier is not valid on the 'this' pattern node");
+        }
+      }
+      
       {
         auto object = processor.consumeValueAlreadyCheckedIndex(constructContext, patternList.items, &itemIndex);
         if(object is null) {
@@ -385,7 +401,7 @@ Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) c
     }
 
     if(itemIndex >= patternList.items.length) {
-      appendNode(PatternNode(nodeNameString, CountType.one, PrimitiveType.anything));
+      appendNode(PatternNode(nodeNameString, CountType.one, Raw.off, PrimitiveType.anything));
       break;
     }
 
@@ -397,11 +413,25 @@ Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) c
       if(newIndex > itemIndex) {
         itemIndex = newIndex;
         if(itemIndex >= patternList.items.length) {
-          appendNode(PatternNode(nodeNameString, countType, PrimitiveType.anything));
+          appendNode(PatternNode(nodeNameString, countType, Raw.off, PrimitiveType.anything));
           break;
         }
       }
     }
+
+    // Check for raw
+    Raw raw = Raw.off;
+    if(auto symbol = patternList.items[itemIndex].tryAsConstructSymbol) {
+      if(symbol.value == "raw") {
+	raw = Raw.on;
+        itemIndex++;
+        if(itemIndex >= patternList.items.length) {
+          appendNode(PatternNode(nodeNameString, CountType.one, raw, PrimitiveType.anything));
+          break;
+        }
+      }
+    }
+
     ConstructType type;
     {
       auto object = processor.consumeValueAlreadyCheckedIndex(constructContext, patternList.items, &itemIndex);
@@ -410,12 +440,13 @@ Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) c
 				      "expected the expression to return a type but returned null");
       }
       if(object.isListBreak) {
-        appendNode(PatternNode(nodeNameString, countType, PrimitiveType.anything));
+        appendNode(PatternNode(nodeNameString, countType, raw, PrimitiveType.anything));
 	continue;
       }
 
       type = getPatternType(processor, object).unconst;
 
+      /*
       // Check that the pattern is valid so far
       if(type.isAnySymbolType) {
         if(countType != CountType.one) {
@@ -431,19 +462,20 @@ Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) c
           }
         }
       }
+      */
     }
 
     if(itemIndex >= patternList.items.length) {
-      appendNode(PatternNode(nodeNameString, countType, type.immutable_));
+      appendNode(PatternNode(nodeNameString, countType, raw, type.immutable_));
       break;
     }
     if(patternList.items[itemIndex].isListBreak) {
-      appendNode(PatternNode(nodeNameString, countType, type.immutable_));
+      appendNode(PatternNode(nodeNameString, countType, raw, type.immutable_));
       itemIndex++;
       continue;
     }
 
-    appendNode(PatternNode(nodeNameString, countType, type.immutable_));
+    appendNode(PatternNode(nodeNameString, countType, raw, type.immutable_));
     if(itemIndex >= patternList.items.length) {
       break;
     }

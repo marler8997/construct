@@ -1,5 +1,6 @@
 
 
+/*
 defclass Instruction
 {
     
@@ -7,9 +8,20 @@ defclass Instruction
 defclass MovInstruction : Instruction
 {
 }
-
-
 defcon mov (reg symbol, value number)
 {
   message "emit mov " reg " " value;
 }
+*/
+
+class Directive
+{
+}
+/*
+class Label : Directive
+{
+}
+class Instruction : Directive
+{
+}
+*/

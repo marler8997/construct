@@ -4,6 +4,7 @@
 import "regression/import"
 import "regression/setlet"
 import "regression/basics"
+import "regression/raw"
 import "regression/patterns"
 import "regression/defcon"
 import "regression/foreach"

@@ -1,24 +1,47 @@
+import relative "util"
 
+let aVar "My String";
+message "aVar is '" aVar "'";
 
-
-let aString "My String";
-message "aString is '" aString "'";
-
-set aString null;
-message "aString is '" aString "'";
-
+set aVar "";
+message "aVar is '" aVar "'";
 
 defcon optionalString(str optional string, _ constructBreak)
 {
-  if str != null {
-    message "is not null";
-  }
-  if str == null {
-    message "is null";
-  }
   message "optional str is '" str "'";
 }
 
 optionalString "a";
-optionalString null;
 optionalString;
+
+// Demonstrate that null is not a string,
+// this is likely different than other languages
+expectFail {
+  optionalString null;
+}
+
+
+/*
+expectFail
+{
+  defcon invalid(str string)
+  {
+    // since a string cannot be null, the compiler should detect
+    // this is an invalid comparison
+    if(str == null) {
+      message "should never happen";
+    }
+  }
+}
+expectFail
+{
+  defcon invalid(str optional string)
+  {
+    // even an optional string cannot be null, this should also
+    // be an invalid comparison
+    if(str == null) {
+      message "should never happen";
+    }
+  }
+}
+*/

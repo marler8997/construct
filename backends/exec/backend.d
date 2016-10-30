@@ -9,7 +9,7 @@ import std.conv   : to;
 import construct.util;
 import construct.parserCore;
 import construct.backendCore : ConstructType, PrimitiveType, ConstructDefinition, ConstructAttributes,
-                               PrimitiveTypeEnum;
+                               PrimitiveTypeEnum, ConstructOptionalValue;
 import construct.processor : ConstructProcessor, ProcessorFunc,
                              FunctionConstructDefinition, logDev;
 
@@ -48,11 +48,23 @@ const(ConstructObject) messageHandler(ConstructProcessor* processor,
 {
   // wrap in debug to retain purity
   debug {
+  OBJECT_LOOP:
     while(true) {
-      auto object = processor.consumeValue(definition, constructSymbol, objects, argIndex);
-      if(object is null) {
-        throw processor.semanticError(constructSymbol.lineNumber, "the message construct does not handle void statements");
+      auto object = processor.consumeValue(definition, constructSymbol, objects, argIndex).unconst;
+      while(true) {
+        if(object is null) {
+          throw processor.semanticError(constructSymbol.lineNumber, "the message construct does not handle void statements");
+        }
+        if(auto optionalValue = object.tryAsConstructOptionalValue) {
+          object = optionalValue.value.unconst;
+          if(object is null) {
+            write("<optional-no-value>");
+            continue OBJECT_LOOP;
+          }
+        }
+        break;
       }
+
       if(object.isObjectBreak) {
         break;
       } else if(auto string_ = object.tryAsConstructString) {
@@ -72,7 +84,7 @@ const(ConstructObject) messageHandler(ConstructProcessor* processor,
             continue;
           }
         }
-        
+
         throw imp(format("message printing object of type %s", object.typeName));
       }
     }
