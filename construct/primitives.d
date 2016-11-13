@@ -22,33 +22,34 @@ import backend : loadConstructBackend;
 // because these patterns are required to create other patterns.
 //
 const(ConstructObject) falseHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
-				    const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
+				    Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
 {
   return new ConstructBool(constructSymbol.lineNumber, false);
 }
 immutable falseConstructDefinition = new immutable InternalPatternConstructDefinition
-  ("false", [immutable PatternHandler(&falseHandler, null)], null, ConstructAttributes.init, null);
+  ("false", [immutable PatternHandler(&falseHandler, null, null)], null, ConstructAttributes.init, null);
 const(ConstructObject) trueHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
-				    const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
+                                   Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
 {
   return new ConstructBool(constructSymbol.lineNumber, true);
 }
 immutable trueConstructDefinition = new immutable InternalPatternConstructDefinition
-  ("true", [immutable PatternHandler(&trueHandler, null)], null, ConstructAttributes.init, null);
+  ("true", [immutable PatternHandler(&trueHandler, null, null)], null, ConstructAttributes.init, null);
 const(ConstructObject) nullHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
-				    const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
+                                   Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
 {
   return new ConstructNull(constructSymbol.lineNumber);
 }
 immutable nullConstructDefinition = new immutable InternalPatternConstructDefinition
-  ("null", [immutable PatternHandler(&nullHandler, null)], null, ConstructAttributes.init, null);
+  ("null", [immutable PatternHandler(&nullHandler, null, null)], null, ConstructAttributes.init, null);
 
 immutable oneTypePattern = [immutable PatternNode("type", CountType.one, Raw.off, PrimitiveType.type)];
 struct ListOfConstruct
 {
   private static const(ConstructObject) handler(ConstructProcessor* processor, const(ConstructDefinition) def,
-                                                const(ConstructSymbol) constructSymbol, const(PatternNode)[] patternNodes,
-						const(ObjectOrSize)[] objects) pure
+                                                const(ConstructSymbol) constructSymbol, Object handlerObject,
+                                                const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
+
   {
     assert(objects.length == 1);
     auto type = objects[0].obj.tryAsConstructType;
@@ -56,7 +57,7 @@ struct ListOfConstruct
     return new ConstructTypedListType(constructSymbol.lineNumber, type);
   }
   static immutable definition = new immutable InternalPatternConstructDefinition
-    ("listOf", [immutable PatternHandler(&handler, oneTypePattern)], null, ConstructAttributes.init, null);
+    ("listOf", [immutable PatternHandler(&handler, null, oneTypePattern)], null, ConstructAttributes.init, null);
 }
 
 //
@@ -117,6 +118,7 @@ void generateHandlerThunkFunction(PureStringSink sink, const(char)[] linePrefix,
   sink("(ConstructProcessor* processor");
   sink(", const(ConstructDefinition) constructDefinition");
   sink(", const(ConstructSymbol) constructSymbol");
+  sink(", Object handlerObject");
   sink(", const(PatternNode)[] patternNodes");
   sink(", const(ObjectOrSize)[] args)\n");
   sink(linePrefix);
@@ -263,7 +265,7 @@ void generateConstructCode(PureStringSink sink, const(ConstructName) constructSy
       if(handlerIndex > 0) {
 	sink(",\n          ");
       }
-      formattedWrite(sink, "immutable PatternHandler(&thunkToHandler_%s_%s, pattern_%s_%s.nodes)",
+      formattedWrite(sink, "immutable PatternHandler(&thunkToHandler_%s_%s, null, pattern_%s_%s.nodes)",
                      noTypeIndex, handlerIndex, noTypeIndex, handlerIndex);
     }
   }
@@ -283,7 +285,7 @@ void generateConstructCode(PureStringSink sink, const(ConstructName) constructSy
           if(handlerIndex > 0) {
             sink(",\n          ");
           }
-          formattedWrite(sink, "immutable PatternHandler(&thunkToHandler_%s_%s, pattern_%s_%s.nodes)",
+          formattedWrite(sink, "immutable PatternHandler(&thunkToHandler_%s_%s, null, pattern_%s_%s.nodes)",
                          opPatternIndex, handlerIndex, opPatternIndex, handlerIndex);
         }
         sink("])");
@@ -362,34 +364,67 @@ mixin(formattedString!(generateConstructCode)
     auto existing = processor.tryLookupSymbolAndScope(name.value);
     if(existing.entryList.first) {
 
+      if(existing.entryList.moreCount) {
+        throw imp("a symbol with multiple entries at the same scope");
+      }
+
       if(existing.symbols is processor.currentScope.symbols) {
-        throw imp("add new construct pattern and block to existin one");
+        throw imp("add new construct pattern and block to existing one");
         //existing.addBlockConstruct(constructSymbol.lineNumber, processor.currentFile.name, processedPattern, implementation);
       } else {
-        throw imp("combine old add new construct to current scope");
+
+        if(auto existingConstruct = existing.entryList.first.tryAsConstructDefinition) {
+          PatternConstructDefinition patternConstruct = cast(PatternConstructDefinition)existingConstruct;
+          if(!patternConstruct) {
+            throw imp("combining with non-pattern construct");
+          }
+
+          if(processedPattern.opType) {
+            throw imp();
+            //processor.addSymbol(name.value, patternConstruct.combine(immutable OpPatternHandlers(processedPattern.opType,
+            //pattern));
+          } else {
+            processor.addSymbol(name.value, patternConstruct.combine
+                                (immutable PatternHandler(&handleConstructWithBlock, implementation.immutable_,
+                                                          processedPattern.nodes.immutable_)));
+          }
+
+        } else {
+          addNewConstruct(processor, cast(string)name.value, constructSymbol.lineNumber,
+                          processedPattern, implementation);
+        }
+
       }
 
     } else {
-      immutable(PatternHandler)[] patternHandlerArray =
-        [immutable PatternHandler(&handleConstructWithBlock, processedPattern.nodes.immutable_)];
-
-
-      immutable(PatternHandler)[] noOpPatternHandlers;
-      immutable(OpPatternHandlers)[] opPatternHandlers;
-      if(processedPattern.opType) {
-        noOpPatternHandlers = null;
-        opPatternHandlers   = [immutable OpPatternHandlers(processedPattern.opType, patternHandlerArray)];
-      } else {
-        noOpPatternHandlers = patternHandlerArray;
-        opPatternHandlers   = null;
-      }
-      processor.addSymbol(name.value, new immutable ConstructWithBlockDefinition
-                          (cast(string)name.value, noOpPatternHandlers, opPatternHandlers,
-                           constructSymbol.lineNumber, cast(string)processor.currentFile.relativeName,
-                           attributes, null, cast(immutable(ConstructBlock))implementation));
+      addNewConstruct(processor, cast(string)name.value, constructSymbol.lineNumber,
+                      processedPattern, implementation);
     }
     return null;
 })]));
+
+private void addNewConstruct(ConstructProcessor* processor, string name, size_t lineNumber,
+                     Pattern processedPattern, const(ConstructBlock) implementation)
+{
+  ConstructAttributes attributes;
+
+  immutable(PatternHandler)[] patternHandlerArray =
+    [immutable PatternHandler(&handleConstructWithBlock, implementation.immutable_, processedPattern.nodes.immutable_)];
+
+  immutable(PatternHandler)[] noOpPatternHandlers;
+  immutable(OpPatternHandlers)[] opPatternHandlers;
+  if(processedPattern.opType) {
+    noOpPatternHandlers = null;
+    opPatternHandlers   = [immutable OpPatternHandlers(processedPattern.opType, patternHandlerArray)];
+  } else {
+    noOpPatternHandlers = patternHandlerArray;
+    opPatternHandlers   = null;
+  }
+  processor.addSymbol(name, new immutable PatternConstructDefinition
+                      (name, noOpPatternHandlers, opPatternHandlers,
+                       lineNumber, cast(string)processor.currentFile.relativeName,
+                       attributes, null));
+}
 
 mixin(formattedString!(generateConstructCode)
       (ConstructName("toSymbol"), [ConstructPatternHandler.fromPattern("(string_ string)", "return new ConstructSymbol(string_.lineNumber, string_.toUtf8());")]));

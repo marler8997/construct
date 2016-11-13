@@ -185,45 +185,30 @@ This returns the symbol x, unless you terminate it with a semicolon
   set x 3
 ```
 
-Construct Patterns
---------------------------------
+Pattern Matching
+--------------------------------------------------
+Exploring ways for the pattern matcher to work.
 
-A construct consumes objects based on a pattern definition.
-The pattern definition determines how construct objects are consumed
-and also defines the interface to the construct implementation.
+One way do it is to keep an array of all the objects that have
+been processed.  Each potential pattern that has been matched
+can then indicate which "match type" it used to match each object.
+The following table demonstrates this:
 
-```
-// defcon import (names string ...) requiresBreak=true;
-// The 'import' construct takes one or more strings, followed by a semi-colon.
-// It also returns nothing.
-import-pattern ::= string* break
+|Processed Object Types |   uint    |   utf8    |  bool  |
+|-----------------------|-----------|-----------|--------|
+|Pattern 0 Match Types  |  unsigned |  anything |  bool  |
+|Pattern 1 Match Types  |  number   |  string   |  bool  |
 
-// the 'let' construct: grammar definition
-let-pattern ::= symbol object break?
+In this example the best matched pattern should probably be
+ambiguous because pattern 0 matches the first object better,
+but pattern 1 matches the second object better.
 
-// the 'message' construct grammar definition
-message-pattern ::= anything* break
-
-// the 'try' construct grammar definition
-try-pattern :: block ('catch' block)? ('finally' block)?
-
-// the 'return' construct
-return-patter :: value? break
-
-
-
-defcon defcon (pattern list null) requiresBreak=true;
-// A defcon with no code block implementation requires a terminating semi-colon break.
-// If no params list is specified, the values is null
-
-defcon defcon (pattern list null, implementation constructBlock) noBreak=true;
-// This version includes an implementation and must not have a terminating semi-colon break.
-// If no params list is specified, the values is null
-
-defcon exec (code constructBlock);
-
-//defcon deftype
-```
+For patterns that contain raw symbols, I think the best way to
+handle those is to give them priority.  If a pattern matches
+a raw node, then all other patterns are temporarily dropped (unless they
+also matched a raw node at the same time).  If any of the patterns
+that matched the raw node match their entire pattern, then they
+will be the "best matched pattern".
 
 
 ConstructString type

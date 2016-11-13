@@ -1,0 +1,28 @@
+
+defcon printTheFollowing (value)
+{
+  message value;
+}
+
+printTheFollowing 3
+
+{
+  defcon printTheFollowing (value number)
+  {
+    message "number is " value;
+  }
+  printTheFollowing 3
+}
+
+printTheFollowing 3
+
+
+
+/*
+defcon . (this, _ raw "printme")
+{
+  message this;
+}
+
+3.printme
+*/

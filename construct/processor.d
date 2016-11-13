@@ -866,7 +866,7 @@ struct ConstructProcessor
       */
     }
 
-    return matched.handler(&this, con, constructSymbol, matched.patternNodes, args.data);
+    return matched.handler(&this, con, constructSymbol, matched.handlerObject, matched.patternNodes, args.data);
   }
 
   const(ConstructObject) consumeValue(const(IConstructContext) constructContext, const(ConstructSymbol) constructSymbol,
@@ -1083,14 +1083,12 @@ class FunctionConstructDefinition : NoPatternConstruct
 }
 const(ConstructObject) handleConstructWithBlock
 (ConstructProcessor* processor, const(ConstructDefinition) definition, const(ConstructSymbol) constructSymbol,
- const(PatternNode)[] patternNodes, const(ObjectOrSize)[] args)
+ Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] args)
 {
-  auto withBlock = cast(ConstructWithBlockDefinition)definition;
-  //auto patternNodes = withBlock.getPatternHandlers()[0].patternNodes;
+  auto block = cast(const(ConstructBlock))handlerObject;
+  assert(block, "code bug: handlerObject is not a ConstructBlock");
 
-  //logDev("pattern is '%s'", pattern);
-
-  processor.pushScope(withBlock.block.lineNumber, ScopeType.defcon, true);
+  processor.pushScope(block.lineNumber, ScopeType.defcon, true);
   scope(exit) { processor.popScope(); }
 
   // Prepare to call the construct by adding the objects that were setup
@@ -1124,8 +1122,9 @@ const(ConstructObject) handleConstructWithBlock
     throw new Exception("code bug: handleConstructWithBlock did not use all the arguments that were returned by matchPattern");
   }
 
-  return processor.processConstructImplementationBlock(withBlock.block.objects, withBlock);
+  return processor.processConstructImplementationBlock(block.objects, definition);
 }
+/*
 class ConstructWithBlockDefinition : PatternConstructDefinition
 {
   const ConstructBlock block;
@@ -1138,6 +1137,7 @@ class ConstructWithBlockDefinition : PatternConstructDefinition
     this.block = block;
   }
 }
+*/
 
 /+
 class DeftypeConstructDefinition : ConstructDefinition

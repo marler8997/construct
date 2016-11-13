@@ -172,6 +172,10 @@ PrimitiveTypeDefinition definition(PrimitiveTypeEnum typeEnum) pure nothrow @nog
 {
   return primitiveTypes[cast(size_t)typeEnum];
 }
+immutable(PrimitiveTypeDefinition)* definitionRef(PrimitiveTypeEnum typeEnum) pure nothrow @nogc @safe
+{
+  return &primitiveTypes[cast(size_t)typeEnum];
+}
 bool canBe(PrimitiveTypeEnum typeEnum, PrimitiveTypeEnum canBeEnum) pure
 {
   return typeEnum == canBeEnum ||
@@ -336,11 +340,12 @@ union ObjectOrSize
 //   case "many" and "oneOrMore": the number of values, followed by those values
 alias ConstructHandler = const(ConstructObject) function
   (ConstructProcessor* processor, const(ConstructDefinition) definition, const(ConstructSymbol) constructSymbol,
-   const(PatternNode)[] patternNodes, const(ObjectOrSize)[] args);
+   Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] args);
 
 struct PatternHandler
 {
   ConstructHandler handler;
+  Object handlerObject;
   PatternNode[] patternNodes;
 }
 
@@ -409,7 +414,6 @@ class ConstructDefinition : ConstructObject, IConstructContext
   {
     throw imp("ConstructDefinition equals");
   }
-
   abstract const(PatternHandler)[] getPatternHandlers(const(ConstructObject) op) const;
 
   final override void toString(scope void delegate(const(char)[]) sink) const
@@ -477,6 +481,11 @@ class PatternConstructDefinition : ConstructDefinition
       }
     }
     return bestMatch.patternHandlers;
+  }
+  final immutable(PatternConstructDefinition) combine(immutable(PatternHandler) newHandler)
+  {
+    return new immutable PatternConstructDefinition(name, noOpPatternHandlers~newHandler, opPatternHandlers,
+                                                    lineNumber, cast(string)filename, attributes, cast(immutable(ConstructType))evalTo);
   }
 }
 class InternalPatternConstructDefinition : PatternConstructDefinition
@@ -1006,7 +1015,7 @@ class ConstructBool : ConstructPredicate
 {
   static immutable(ConstructBool) false_ = new ConstructBool(0, false);
   static immutable(ConstructBool) true_ = new ConstructBool(0, true);
-  
+
   bool value;
   this(size_t lineNumber, bool value) pure
   {
