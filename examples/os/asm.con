@@ -1,27 +1,33 @@
 
-
-/*
-defclass Instruction
-{
-    
-}
-defclass MovInstruction : Instruction
-{
-}
-defcon mov (reg symbol, value number)
-{
-  message "emit mov " reg " " value;
-}
-*/
-
 class Directive
 {
 }
-/*
-class Label : Directive
+class Label // : Directive
 {
 }
-class Instruction : Directive
+class Instruction // : Directive
 {
+  //string name;
+}
+class MovRegValueInstruction
+{
+  //symbol reg;
+  //number value;
+}
+defcon mov (reg symbol, value number)
+{
+  message "matched: mov " reg " " value;
+  //return new MovRegValueInstruction
+  return new Directive
+}
+
+/*
+defStatementMode assembly source result
+{
+  message "AssemblyModeHandler source=" source ", result=" result;
 }
 */
+let assemblyMode createStatementMode source result
+{
+  message "AssemblyModeHandler source=" source ", result=" result;
+};

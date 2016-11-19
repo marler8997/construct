@@ -210,6 +210,12 @@ also matched a raw node at the same time).  If any of the patterns
 that matched the raw node match their entire pattern, then they
 will be the "best matched pattern".
 
+I'm thinking that for now I'm going to support multiple pattern matching
+modes.  The first mode will be the simplest to implement, "first match
+of last defined".  This means that it will check constructs in the reverse
+order they were defined, and as soon as it finds a match, it executes that
+construct.
+
 
 ConstructString type
 --------------------------------------------------

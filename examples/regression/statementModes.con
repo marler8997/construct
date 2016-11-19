@@ -1,0 +1,33 @@
+
+
+let calculator createStatementMode source result
+{
+  if not result.isPresent {
+    message "WARNING: in calculator mode, every statement must evalulate to a number, but got a void statement";
+    //throw "in calculator mode, every statement must evaluate to a number, but got a void statement";
+  }
+  //else
+  if result.isPresent
+  {
+    // Note: this line should be unnecessary
+    set result result.value;
+
+    if result isA number {
+      message source;
+      message "    = " result;
+    }
+    //else {
+    if not result isA number {
+      message "WARNING: in calculator mode, every statement must evalulate to a number, but got: " result;
+      //throw "in calculator mode, every statement must evalulate to a number, but got: " result;
+    }
+  }
+};
+
+
+{
+  setStatementMode calculator
+  1
+  2+3
+  //"Hello, World!".length
+}

@@ -11,6 +11,7 @@ import construct.logging;
 import construct.parserCore;
 import construct.patterns   : PatternNode, PatternTree, Pattern;
 import construct.processor  : ConstructProcessor, Scope;
+import construct.primitives : DefaultStatementModeConstruct;
 
 //version = VerboseTests;
 
@@ -63,6 +64,8 @@ enum PrimitiveTypeEnum {
   limitUnicode,
   limitUtf8,
   */
+
+  statementMode,
 }
 
 struct PrimitiveTypeDefinition
@@ -166,6 +169,7 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
    PrimitiveTypeDefinition("limitUnicode", PrimitiveTypeEnum.limitUnicode  , PrimitiveTypeEnum.limitArray),
    PrimitiveTypeDefinition("limitUtf8"   , PrimitiveTypeEnum.limitUtf8     , PrimitiveTypeEnum.limitUnicode),
    */
+   PrimitiveTypeDefinition("statementMode", PrimitiveTypeEnum.statementMode, PrimitiveTypeEnum.anything, PrimitiveType.statementMode, "ConstructStatementMode"),
    ];
 
 PrimitiveTypeDefinition definition(PrimitiveTypeEnum typeEnum) pure nothrow @nogc @safe
@@ -239,21 +243,6 @@ inout(T) enforceAs(T)(inout(ConstructObject) obj)
     throw new Exception(format("expected %s but got %s", An(T.staticTypeName), An(obj.typeName)));
   }
   return value;
-}
-
-//immutable defaultConstructMode =
-class ConstructMode : ConstructObject
-{
-  string sourceVar;
-  string resultVar;
-  const(ConstructBlock) handlerBlock;
-  this(size_t lineNumber, string sourceVar, string resultVar, ConstructBlock handlerBlock) pure
-  {
-    super(lineNumber);
-    this.sourceVar = sourceVar;
-    this.resultVar = resultVar;
-    this.handlerBlock = handlerBlock;
-  }
 }
 
 PrimitiveType create(PrimitiveTypeEnum typeEnum, size_t lineNumber)
@@ -615,6 +604,7 @@ class PrimitiveType : ConstructType
   static immutable list           = new PrimitiveType(0, PrimitiveTypeEnum.list);
   static immutable class_         = new PrimitiveType(0, PrimitiveTypeEnum.class_);
   static immutable constructBreak = new PrimitiveType(0, PrimitiveTypeEnum.constructBreak);
+  static immutable statementMode  = new PrimitiveType(0, PrimitiveTypeEnum.statementMode);
 }
 
 class KeywordType : ConstructType
@@ -934,7 +924,6 @@ class ConstructClass : ConstructNullable
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.class_);
 
   enum processorValueType = "ConstructClass";
-  enum processorOptionalValueType = "ConstructClass";
 
   @property final override inout(ConstructClass) tryAsConstructClass() inout pure { return this; }
   @property final override bool isNull() const { throw imp("ConstructClass.isNull"); }
@@ -976,10 +965,10 @@ class ConstructOptionalValue : ConstructObject
   override void toString(scope void delegate(const(char)[]) sink) const
   {
     if(value) {
-      sink("<no-value>");
-    } else {
       sink("has-value: ");
       value.toString(sink);
+    } else {
+      sink("<no-value>");
     }
   }
   mixin virtualEqualsMember!ConstructOptionalValue;
@@ -1027,7 +1016,6 @@ class ConstructBool : ConstructPredicate
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.bool_);
 
   enum processorValueType = "ConstructBool";
-  enum processorOptionalValueType = "ConstructBool";
 
   @property final override bool isTrue() const { return value; }
   @property final override inout(ConstructBool) tryAsConstructBool() inout pure { return this; }
@@ -1073,7 +1061,6 @@ class ConstructNumber : ConstructObject
     super(lineNumber);
   }
   enum processorValueType = "ConstructNumber";
-  enum processorOptionalValueType = "ConstructNumber";
   @property final override inout(ConstructNumber) tryAsConstructNumber() inout pure { return this; }
 
   abstract const(ConstructNumber) add(const(ConstructNumber) other) const pure;
@@ -1092,7 +1079,6 @@ class ConstructPointer : ConstructNullable
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.pointer);
 
   enum processorValueType = "ConstructPointer";
-  enum processorOptionalValueType = "ConstructPointer";
 
   @property final override inout(ConstructPointer) tryAsConstructPointer() inout pure { return this; }
   @property final override bool isNull() const { return pointer is null; }
@@ -1118,7 +1104,6 @@ class ConstructArray : ConstructObject
   enum staticPrimitiveTypeEnum = PrimitiveTypeEnum.array;
 
   enum processorValueType = "ConstructArray";
-  enum processorOptionalValueType = "ConstructArray";
 
   //@property final override inout(ConstructString) tryAsConstructString() inout pure { return this; }
 
@@ -1135,10 +1120,52 @@ class ConstructString : ConstructArray
   enum staticPrimitiveTypeEnum = PrimitiveTypeEnum.string_;
 
   enum processorValueType = "ConstructString";
-  enum processorOptionalValueType = "ConstructString";
 
   @property final override inout(ConstructString) tryAsConstructString() inout pure { return this; }
 
   abstract string toUtf8() const pure;
   abstract size_t stringByteLength(PrimitiveTypeEnum type) const pure;
 }
+class ConstructStatementMode : ConstructObject
+{
+  static immutable(ConstructStatementMode) default_ = new immutable ConstructStatementMode
+    (0, DefaultStatementModeConstruct.definition);
+  
+  const(PatternConstructDefinition) handlerConstruct;
+  this(size_t lineNumber, const(PatternConstructDefinition) handlerConstruct) pure
+  {
+    super(lineNumber);
+    this.handlerConstruct = handlerConstruct;
+  }
+  this(size_t lineNumber, immutable(PatternConstructDefinition) handlerConstruct) pure immutable
+  {
+    super(lineNumber);
+    this.handlerConstruct = handlerConstruct;
+  }
+  enum staticTypeName = "statementMode";
+  enum staticPrimitiveTypeEnum = PrimitiveTypeEnum.statementMode;
+
+  mixin finalTypeNameMembers!"statementMode";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.statementMode);
+
+  enum processorValueType = "ConstructStatementMode";
+
+  @property final override inout(ConstructStatementMode) tryAsConstructStatementMode() inout pure { return this; }
+
+  final override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    throw imp();
+  }
+  mixin virtualEqualsMember!ConstructStatementMode;
+  final bool typedEquals(const(ConstructStatementMode) other) const pure
+  {
+    throw imp();
+    /*
+    return other &&
+      this.sourceVar == other.sourceVar &&
+      this.resultVar == other.resultVar &&
+      this.handlerBlock == other.handlerBlock;
+    */
+  }
+}
+

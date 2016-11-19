@@ -1,0 +1,22 @@
+import relative "../util"
+
+// Note: we are in pattern mode firstMatch
+assert getPatternMode == "firstMatch"
+
+defcon assertValue(x)
+{
+  assert x == 3
+}
+
+assertValue 3
+expectFail {
+  assertValue 4
+}
+
+{
+  defcon assertValue(x)
+  {
+    assert x == 4
+  }
+  assertValue 4
+}

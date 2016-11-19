@@ -3,11 +3,13 @@ module construct.parserCore;
 import std.format   : format, formattedWrite;
 import std.array    : Appender;
 import construct.util;
+import construct.logging;
 import construct.patterns    : PatternNode;
 import construct.backendCore : PrimitiveTypeEnum, ConstructDefinition, ConstructNumber,
                                ConstructPredicate, ConstructBool, ConstructNullable,
                                ConstructType, ConstructOptionalValue, definition, commonType, canBe,
                                ConstructPattern, ConstructClassDefinition, ConstructClass,
+                               ConstructStatementMode,
                                ConstructReturn, ConstructPointer, ConstructArray, ConstructString;
 import construct.processor   : ConstructProcessor;
 
@@ -32,7 +34,8 @@ enum ConstructClasses =
    "ConstructList",
    "ConstructPattern",
    "ConstructClassDefinition",
-   "ConstructClass"];
+   "ConstructClass",
+   "ConstructStatementMode"];
 
 class ConstructException : Exception
 {
@@ -179,7 +182,6 @@ class ObjectBreak : ConstructObject
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.constructBreak);
 
   enum processorValueType = null;
-  enum processorOptionalValueType = "ObjectBreak";
 
   @property final override inout(ObjectBreak) tryAsObjectBreak() inout pure { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const
@@ -291,7 +293,6 @@ class ConstructUint : ConstructNumber
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.uint_);
 
   enum processorValueType = "ConstructUint";
-  enum processorOptionalValueType = "ConstructUint";
 
   @property final override inout(ConstructUint) tryAsConstructUint() inout pure { return this; }
 
@@ -332,7 +333,6 @@ class ConstructBlock : ConstructObject
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.constructBlock);
 
   enum processorValueType = "ConstructBlock";
-  enum processorOptionalValueType = "ConstructBlock";
   @property final override inout(ConstructBlock) tryAsConstructBlock() inout pure { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
@@ -390,7 +390,6 @@ class ConstructList : ConstructObject
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.list);
 
   enum processorValueType = "ConstructList";
-  enum processorOptionalValueType = "ConstructList";
 
   @property final override inout(ConstructList) tryAsConstructList() inout pure { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const

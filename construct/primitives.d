@@ -59,6 +59,34 @@ struct ListOfConstruct
   static immutable definition = new immutable InternalPatternConstructDefinition
     ("listOf", [immutable PatternHandler(&handler, null, oneTypePattern)], null, ConstructAttributes.init, null);
 }
+// I think this has to be defined early because it is used to process constructs
+class DefaultStatementModeConstruct
+{
+  public static const(ConstructObject) handle(ConstructProcessor* processor, const(ConstructObject) result) pure
+  {
+    if(result) {
+      if(auto return_ = result.tryAsConstructReturn) {
+	return return_;
+      }
+      throw processor.semanticError(result.lineNumber, format
+				    ("unhandled statement value (type %s)", result.typeName));
+    } else {
+      return null;
+    }
+  }
+  private static const(ConstructObject) handler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
+					 Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
+  {
+    assert(objects.length == 2);
+    assert(objects[0].size == 0);
+    return handle(processor, objects[1].obj);
+  }
+  static immutable definition = new immutable InternalPatternConstructDefinition
+    ("defaultStatementMode", [immutable PatternHandler(&handler, null, null)], null, ConstructAttributes.init, null);
+}
+//mixin(formattedString!(generatePatternConstructCode)(ConstructName("defaultStatementMode"), "(source, result)", q{
+//  throw imp();
+//}));
 
 //
 // Functions to generate D code for processing constructs
@@ -404,7 +432,7 @@ mixin(formattedString!(generateConstructCode)
 })]));
 
 private void addNewConstruct(ConstructProcessor* processor, string name, size_t lineNumber,
-                     Pattern processedPattern, const(ConstructBlock) implementation)
+			     Pattern processedPattern, const(ConstructBlock) implementation)
 {
   ConstructAttributes attributes;
 
@@ -463,6 +491,16 @@ const(ConstructObject) ifConstructHandler(ConstructProcessor* processor,
   }
 }
 */
+/*
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("typeof"), "(obj)", q{
+  return obj.
+}));
+*/
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("isA"), "(this, typeToCheck type)", q{
+  return new ConstructBool(constructSymbol.lineNumber, this_.canBe(typeToCheck));
+}));
+
+
 //
 // Operators
 //
@@ -486,10 +524,19 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("assert"), "(
       }
       return null;
 }));
+
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("throw"), "(message string)", q{
     throw new ConstructThrownException(constructSymbol.lineNumber, processor, message.toUtf8());
 }));
-
+/*
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("throw"), "(messageObjects oneOrMore string, _ constructBreak)", q{
+  auto messageBuilder = appender!(char[])(256);
+  foreach(messageObject; messageObjects.length) {
+    messageObject.toString(messageBuilder.put);
+  }
+  throw new ConstructThrownException(constructSymbol.lineNumber, processor, cast(string)messageBuilder.data);
+}));
+*/
 
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("not"), "(value predicate)", q{
       return new ConstructBool(constructSymbol.lineNumber, !value.isTrue);
@@ -773,11 +820,45 @@ const(ConstructObject) foreachConstructHandler(ConstructProcessor* processor,
 // Modes
 //
 //(name symbol, handlerClause pattern(_ "handler", source raw symbol, result raw symbol, handlerBlock constructBlock))
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("createMode"), q{
+/*
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("defStatementMode"), q{
       (name raw symbol, source raw symbol, result raw symbol, handlerBlock constructBlock)
 }, q{
-      throw imp("createMode");
+      throw imp("defStatementMode");
       //return new ConstructPointer(constructSymbol.lineNumber, malloc(size.value));
+}));
+*/
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("createStatementMode"),
+						     "(source raw symbol, result raw symbol, handlerBlock constructBlock)", q{
+  ConstructAttributes attributes;
+  return new ConstructStatementMode(constructSymbol.lineNumber, new immutable PatternConstructDefinition
+				    (null, [immutable PatternHandler
+					    (&handleConstructWithBlock, handlerBlock.immutable_,
+					     [immutable PatternNode(source.value, CountType.optional, Raw.off, PrimitiveType.anything),
+					      immutable PatternNode(result.value, CountType.optional, Raw.off, PrimitiveType.anything)])],
+				     null, constructSymbol.lineNumber, cast(string)processor.currentFile.relativeName, attributes, null));
+}));
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("getStatementMode"), "()", q{
+  return processor.statementMode;
+}));
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("setStatementMode"), "(mode statementMode)", q{
+  processor.setStatementMode(mode);
+  return null;
+}));
+
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("getPatternMode"), "()", q{
+  return new ConstructUtf8(constructSymbol.lineNumber, processor.patternMode.to!string);
+}));
+
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("setPatternMode"), "(name raw symbol)", q{
+  PatternMode mode;
+  if(name.value == "firstMatch") {
+    mode = PatternMode.firstMatch;
+  } else {
+    throw processor.semanticError(definition.lineNumber, format("unknown pattern node '%s'", name.value));
+  }
+  processor.setPatternMode(mode);
+  return null;
 }));
 
 //
@@ -814,7 +895,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("class"), "(n
           logDev("need to add class member symbol '%s' to current scope", symbolName);
         }
       }
-      throw imp("adding class members to outer scope as dot operator constructs");
+      //throw imp("adding class members to outer scope as dot operator constructs");
 
       processor.addSymbol(name.value, new ConstructClassDefinition
                           (constructSymbol.lineNumber, cast(string)name.value, classDefScope));
@@ -831,8 +912,11 @@ mixin(formattedString!(generateConstructCode)
         ConstructPatternHandler.fromPattern("(this optionalValue, _ raw \"isPresent\")",q{
             // TODO: return a side affect that affects the type of the symbol
             //       that was passed in.
-            return (this_ is null) ? ConstructBool.false_ : ConstructBool.true_;
+            return (this_.value is null) ? ConstructBool.false_ : ConstructBool.true_;
           }),
+	ConstructPatternHandler.fromPattern("(this optionalValue, _ raw \"value\")",q{
+	    return this_.value;
+	  }),
         //ConstructPatternHandler.fromPattern("(symbol symbol)", "return symbol;"),
         //ConstructPatternHandler.fromPattern("(string_ string)", "return new ConstructSymbol(string_.lineNumber, string_.toUtf8());")
 

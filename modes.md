@@ -1,18 +1,19 @@
-Modes
+The Statement Mode
 ================================================================================
-
-When processing construct code, the mode affects how statements are handled.
-In the default mode, the statement handler checks that every statement
-evaluates to null, otherwise, it throws an error.
+When processing construct code, the "statement mode" affects how statements are
+handled. The default statement mode enforces that all statements evaluate to
+to null, otherwise, it throws an error.
 ```
 let a 1; // OK
 let b 2  // ERROR: unhandled statement value 'b'
 3        // ERROR: unhandled statement value '4'
 ```
-However this mode can be changed. Let's say you wanted every statement to
-be printed and evaluated as a number, like a calculator:
+
+The application can also define new statement modes using the 'defStatementMode'
+construct. Let's say you wanted every statement to be printed and evaluated as
+a number, like a calculator:
 ```
-defmode calculator source result
+defStatementMode calculator source result
 {
   if result == null {
     throw "in calculator mode, every statement must evaluate to a number";
@@ -24,7 +25,7 @@ defmode calculator source result
     throw "in calculator mode, every statement must evalulate to a number, but got " result;
   }
 }
-changeMode calculator
+setStatementMode calculator
 1
 2+3
 "Hello, World!".length
@@ -38,18 +39,30 @@ Output:
 "Hello, World!" . length
     = 13
 ```
-The default mode would look somethig like this:
+The default statement mode would look somethig like this:
 ```
-defmode default source result {
+defStatementMode default source result {
   if result != null {
     throw "unhandled statement value " result;
   }
 }
 ```
 
+Note: statement mode only persists inside the block it was set, i.e.
+```
+// current statement mode is "default"
+{
+  setStatementMode calculator
+  //assert getStatementMode == "calculator"
+  // current statement mode "calculator"
+}
+// current statement mode is back to "default"
+//assert getStatementMode == "default"
+```
+
+Another Example
 --------------------------------------------------------------------------------
-For another example, let's suppose you wanted your construct code to represent
-an assembly language.
+Let's suppose you wanted your construct code to represent an assembly language.
 ```
 //
 // Some classes to support the assembly language...

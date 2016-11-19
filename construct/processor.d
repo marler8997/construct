@@ -67,6 +67,11 @@ class ConstructAssertException: ConstructException
 alias SymbolEntryList = OneOrMore!ConstructObject;
 alias SymbolTable = SymbolEntryList[string];
 
+enum PatternMode
+{
+  firstMatch,
+}
+
 struct ImportPath
 {
   const(char)[] relativePath; // should be normalized
@@ -155,6 +160,8 @@ struct Scope
   Scope* addSymbolsTo;
 
   SymbolTable symbols;
+
+  ConstructStatementMode statementModeToRestoreOnPop;
 }
 
 struct ScopeAndEntryList
@@ -167,6 +174,9 @@ struct ScopeAndEntryList
 struct ConstructProcessor
 {
   ImportPath[] importPaths;
+
+  ConstructStatementMode statementMode;
+  PatternMode patternMode;
 
   // key is the absolute normalized filename of the import file
   // NOTE: every file that is imported should be in this map
@@ -185,6 +195,9 @@ struct ConstructProcessor
   this(ImportPath[] importPaths) pure
   {
     this.importPaths = importPaths;
+
+    statementMode = ConstructStatementMode.default_.unconst;
+    
     // TODO: implement 'letset' which adds a symbol if it does not exist, or updates
     //       it if it does exist
     currentScope.symbols =
@@ -217,6 +230,7 @@ struct ConstructProcessor
     addPrimitiveType(PrimitiveType.list);
     //addPrimitiveType(PrimitiveType.class_);
     addPrimitiveType(PrimitiveType.constructBreak);
+    addPrimitiveType(PrimitiveType.statementMode);
   }
   private void addPrimitiveType(const(PrimitiveType) primitiveType) pure
   {
@@ -259,6 +273,12 @@ struct ConstructProcessor
     addConstruct(AddSymbolsToCallerConstruct.definition);
 
     //
+    // Types
+    //
+    //addConstruct(TypeofConstruct.definition);
+    addConstruct(IsAConstruct.definition);
+
+    //
     // Operators
     //
     addConstruct(DotConstruct.definition);
@@ -276,7 +296,12 @@ struct ConstructProcessor
     //
     // Modes
     //
-    addConstruct(CreateModeConstruct.definition);
+    //addConstruct(DefStatementModeConstruct.definition);
+    //addConstruct(GetStatementModeConstruct.definition);
+    addConstruct(CreateStatementModeConstruct.definition);
+    addConstruct(SetStatementModeConstruct.definition);
+    addConstruct(GetPatternModeConstruct.definition);
+    addConstruct(SetPatternModeConstruct.definition);
 
     //
     // Memory
@@ -296,6 +321,11 @@ struct ConstructProcessor
     addConstruct(DumpScopeStackConstruct.definition);
   }
 
+  void setPatternMode(PatternMode mode)
+  {
+    this.patternMode = mode;
+  }
+  
   void pushScope(size_t startLineNumber, ScopeType type, bool openScope) pure
   {
     scopeStack.put(currentScope);
@@ -312,8 +342,21 @@ struct ConstructProcessor
     if(scopeStackLength == 0) {
       throw new Exception("Attempted to pop the scope stack when there are no scopes on the stack");
     }
+    // restore mode
     currentScope = scopeStack.data[scopeStackLength-1];
+    if(currentScope.statementModeToRestoreOnPop) {
+      pureLogDev("popScope: restoring statement mode");
+      statementMode = currentScope.statementModeToRestoreOnPop;
+      currentScope.statementModeToRestoreOnPop = null;
+    }
     scopeStack.shrinkTo(scopeStackLength-1);
+  }
+  void setStatementMode(const(ConstructStatementMode) mode)
+  {
+    if(currentScope.statementModeToRestoreOnPop is null) {
+      currentScope.statementModeToRestoreOnPop = statementMode.unconst;
+    }
+    statementMode = mode.unconst;
   }
 
   // Assumption: sourceFile.relativeName
@@ -646,14 +689,31 @@ struct ConstructProcessor
           (NoConstructContext.instance, objects, &index).unconst;
       }
 
-      if(result) {
-        // TODO: call the mode handler
+      /*
+      //if(auto return_ = result.tryAsConstructReturn) {
+      //return return_;
+      //}
+      throw semanticError(result.lineNumber, format
+      ("unhandled statement value (type %s)", result.typeName));
+      */
 
-        if(auto return_ = result.tryAsConstructReturn) {
-          return return_;
-        }
-        throw semanticError(result.lineNumber, format
-                            ("unhandled statement value (type %s)", result.typeName));
+      if(statementMode is ConstructStatementMode.default_) {
+	// Optimization
+	DefaultStatementModeConstruct.handle(&this, result);
+      } else {
+	auto saveStatementMode = statementMode;
+	statementMode = ConstructStatementMode.default_.unconst;
+	scope(exit) {
+	  statementMode = saveStatementMode;
+	}
+	ObjectOrSize[2] args;
+	args[0] = ObjectOrSize(0);
+	args[1] = ObjectOrSize(result);
+	auto statementHandler = saveStatementMode.handlerConstruct.noOpPatternHandlers[0];
+	auto statementHandlerResult = statementHandler.handler(&this, saveStatementMode.handlerConstruct,
+							       null,
+							       statementHandler.handlerObject.unconst,
+							       statementHandler.patternNodes, args);
       }
     }
     return null;
@@ -834,7 +894,9 @@ struct ConstructProcessor
     //logDev("construct '%s' is %s", constructSymbol.value, (con.opParam.matcher is null) ? "NULL" : "NOT NULL");
 
     PatternHandler matched = PatternHandler();
-    foreach(patternHandlerIndex, patternHandler; patternHandlers) {
+    // go in reverse order because most recent constructs will be at the
+    // end of the list
+    foreach_reverse(patternHandlerIndex, patternHandler; patternHandlers) {
       size_t nextIndex;
       nextIndex = *index;
       args.totalSize = appendStartIndex;
@@ -934,7 +996,6 @@ struct ConstructProcessor
     // Check if the next object is a construct that could
     // consume this value with a highier precedence
     //
-
     while(*index < objects.length) {
       auto nextObject = objects[*index];
       auto symbol = nextObject.tryAsConstructSymbol;
@@ -942,11 +1003,11 @@ struct ConstructProcessor
 	break; // object is not a symbol
       }
 
-      //logDebug("looking up symbol '%s' on line %s to see if it is an operation with higher precedence...", symbol.value, symbol.lineNumber);
+      //logDev("looking up symbol '%s' on line %s to see if it is an operation with higher precedence...", symbol.value, symbol.lineNumber);
       auto symbolEntries = tryLookupSymbol(symbol.value);
       //logDev("symbol '%s' entry is %s", symbol.value, symbolEntries);
       if(!symbolEntries.first) {
-	//logDebug("  '%s' does not have a value in the symbol table", symbol.value);
+	//logDev("  '%s' does not have a value in the symbol table", symbol.value);
 	break; // symbol does not exist
       }
 
@@ -957,11 +1018,11 @@ struct ConstructProcessor
       //logDev("Checking if symbol '%s' is an operator construct", symbol.value);
       auto definition = symbolEntries.first.tryAsConstructDefinition;
       if(!definition) {
-	//logDebug("symbol '%s' is not a construct", symbol.value);
+	//logDev("symbol '%s' is not a construct", symbol.value);
 	break; // symbol is not a construct
       }
       if(!definition.hasOperatorPatterns()) {
-	//logDebug("construct '%s' is not an operator construct", symbol.value);
+	//logDev("construct '%s' is not an operator construct", symbol.value);
 	break; // symbol is not an operator construct
       }
 
@@ -970,21 +1031,19 @@ struct ConstructProcessor
         auto currentOpString = constructContext.getConstructName();
         if(currentOpString) {
           if(!Precedence.greaterThan(symbol.value, currentOpString)) {
-	    /*
-            logDebug("operator construct '%s' precedence %s is not higher then the current operator '%s' precedence %s",
-                     symbol.value, Precedence.getPrecedence(symbol.value),
-                     currentOpString, Precedence.getPrecedence(symbol.value));
-	    */
+            //logDev("operator construct '%s' precedence %s is not higher then the current operator '%s' precedence %s",
+	    //symbol.value, Precedence.getPrecedence(symbol.value),
+	    //currentOpString, Precedence.getPrecedence(symbol.value));
             break; // precedence is not high enough
           }
-          logDebug("Operator construct '%s' is higher precedence than '%s'", definition.name, currentOpString);
+          //logDev("Operator construct '%s' is higher precedence than '%s'", definition.name, currentOpString);
         }
       }
 
       // Check if it supports this object
       auto patternHandlers = definition.getPatternHandlers(object);
       if(!patternHandlers) {
-	//logDebug("construct '%s' is not an operator construct", symbol.value);
+	//logDev("construct '%s' is not an operator construct", symbol.value);
 	break; // this construct operator does not support this object
       }
 
