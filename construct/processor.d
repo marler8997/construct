@@ -256,6 +256,7 @@ struct ConstructProcessor
     //currentScope.symbols["deftype"]   = SymbolEntryList(singleton!DeftypeConstructDefinition());
     addConstruct(ExecConstruct.definition);
     addConstruct(ThrowConstruct.definition);
+    addConstruct(ReturnConstruct.definition);
     addConstruct(AssertConstruct.definition);
     addConstruct(tryConstructDefinition);
     addConstruct(LetConstruct.definition);
@@ -644,10 +645,13 @@ struct ConstructProcessor
     pushScope(1, ScopeType.file, false);
     try {
       auto result = processBlock(sourceFile.parsedObjects);
-      if(result) {
-        if(auto return_ = result.tryAsConstructReturn) {
-          throw semanticError(result.lineNumber, "can only return inside a construct");
-        }
+      if(result.isReturn) {
+        throw semanticError(result.lineNumber, "can only return inside a construct");
+      }
+      if(result.hasAction) {
+        throw imp("a root level action construct");
+      }
+      if(result.object) {
         throw semanticError(result.lineNumber, "unhandled expression at root level");
       }
       return currentScope.symbols;
@@ -655,27 +659,22 @@ struct ConstructProcessor
       popScope();
     }
   }
-  const(ConstructObject) processConstructImplementationBlock(const(ConstructObject)[] objects, const(ConstructDefinition) constructDefinition)
+  const(ConstructResult) processConstructImplementationBlock(const(ConstructObject)[] objects, const(ConstructDefinition) constructDefinition)
   {
     ConstructDefinition previousConstruct = currentConstruct;
     currentConstruct = constructDefinition.unconst;
     scope(exit) {
       currentConstruct = previousConstruct;
     }
-    auto result = processBlock(objects);
-    if(result) {
-      if(auto return_ = result.tryAsConstructReturn) {
-        return return_.returnValue;
-      }
-    }
-    return result;
+    // Remove return action
+    return processBlock(objects).withNoReturn();
   }
-  const(ConstructObject) processBlock(const(ConstructObject)[] objects)
+  const(ConstructResult) processBlock(const(ConstructObject)[] objects)
   {
     size_t index = 0;
     size_t lineNumber = 0;
     while(index < objects.length) {
-      ConstructObject result;
+      ConstructResult result;
 
       auto rawObject = objects[index];
       if(auto block = rawObject.tryAsConstructBlock) {
@@ -689,34 +688,31 @@ struct ConstructProcessor
           (NoConstructContext.instance, objects, &index).unconst;
       }
 
-      /*
-      //if(auto return_ = result.tryAsConstructReturn) {
-      //return return_;
-      //}
-      throw semanticError(result.lineNumber, format
-      ("unhandled statement value (type %s)", result.typeName));
-      */
-
       if(statementMode is ConstructStatementMode.default_) {
 	// Optimization
-	DefaultStatementModeConstruct.handle(&this, result);
+	DefaultStatementModeConstruct.handle(&this, result.object, result.action);
       } else {
 	auto saveStatementMode = statementMode;
 	statementMode = ConstructStatementMode.default_.unconst;
 	scope(exit) {
 	  statementMode = saveStatementMode;
 	}
-	ObjectOrSize[2] args;
+	ObjectOrSize[3] args;
 	args[0] = ObjectOrSize(0);
-	args[1] = ObjectOrSize(result);
+	args[1] = ObjectOrSize(result.object);
+	args[2] = ObjectOrSize(result.action);
 	auto statementHandler = saveStatementMode.handlerConstruct.noOpPatternHandlers[0];
 	auto statementHandlerResult = statementHandler.handler(&this, saveStatementMode.handlerConstruct,
 							       null,
 							       statementHandler.handlerObject.unconst,
 							       statementHandler.patternNodes, args);
       }
+
+      if(result.isReturn) {
+        return result;
+      }
     }
-    return null;
+    return ConstructResult(null);
   }
 
   const(ConstructSymbol) consumeSymbol(const(IConstructContext) constructContext,
@@ -754,18 +750,21 @@ struct ConstructProcessor
     }
 
     auto result = consumeValueAlreadyCheckedIndex(constructContext, objects, &nextIndex).unconst;
-    if(!result) {
+    if(result.hasAction) {
+      throw imp("tryConsumeSymbol, result.hasAction is true!");
+    }
+    if(!result.object) {
       throw semanticError(symbol.lineNumber, "The 'sym' keyword expects an expression that evaluates to a symbol or string but evaulated to null");
     }
-    if(auto resolvedSymbol = result.tryAsConstructSymbol) {
+    if(auto resolvedSymbol = result.object.tryAsConstructSymbol) {
       *index = nextIndex;
       return resolvedSymbol;
     }
-    if(auto resolvedString = result.tryAsConstructString) {
+    if(auto resolvedString = result.object.tryAsConstructString) {
       *index = nextIndex;
       return new ConstructSymbol(resolvedString.lineNumber, resolvedString.toUtf8());
     }
-    throw semanticError(symbol.lineNumber, format("The 'sym' keyword expects an expression that evaluates to a symbol or string but evaulated to %s", result.typeName));
+    throw semanticError(symbol.lineNumber, format("The 'sym' keyword expects an expression that evaluates to a symbol or string but evaulated to %s", result.object.typeName));
   }
 
   // appendArg format:
@@ -806,11 +805,19 @@ struct ConstructProcessor
 	// handle the special macro construct
 	if(auto symbol = value.tryAsConstructSymbol) {
 	  if(symbol.value == "macro") {
-	    value = consumeValueAlreadyCheckedIndex(NoConstructContext.instance, objects, &nextIndex).unconst;
+	    auto result = consumeValueAlreadyCheckedIndex(NoConstructContext.instance, objects, &nextIndex).unconst;
+            if(result.hasAction) {
+              throw imp("matchPattern, result has an action(1)!");
+            }
+            value = result.object;
 	  }
 	}
       } else {
-	value = consumeValueAlreadyCheckedIndex(constructContext, objects, &nextIndex).unconst;
+	auto result = consumeValueAlreadyCheckedIndex(constructContext, objects, &nextIndex).unconst;
+        if(result.hasAction) {
+          throw imp("matchPattern, result has an action(2)!");
+        }
+        value = result.object;
       }
       if(value is null) {
 	throw imp("value is null");
@@ -877,7 +884,7 @@ struct ConstructProcessor
     }
   }
 
-  const(ConstructObject) processPatternConstruct(const(ConstructSymbol) constructSymbol, const(ConstructDefinition) con, bool hasOperatorObject,
+  const(ConstructResult) processPatternConstruct(const(ConstructSymbol) constructSymbol, const(ConstructDefinition) con, bool hasOperatorObject,
                                                  const(ConstructObject) opParam, const(PatternHandler)[] patternHandlers, const(ConstructObject)[] objects, size_t* index)
 
   {
@@ -931,7 +938,7 @@ struct ConstructProcessor
     return matched.handler(&this, con, constructSymbol, matched.handlerObject, matched.patternNodes, args.data);
   }
 
-  const(ConstructObject) consumeValue(const(IConstructContext) constructContext, const(ConstructSymbol) constructSymbol,
+  const(ConstructResult) consumeValue(const(IConstructContext) constructContext, const(ConstructSymbol) constructSymbol,
                                       const(ConstructObject)[] objects, size_t* index)
   {
     if(*index >= objects.length) {
@@ -952,7 +959,7 @@ struct ConstructProcessor
   //   operatorPrecedence . higherThan *
   //
   // Assumption: *index < objects.length
-  const(ConstructObject) consumeValueAlreadyCheckedIndex(const(IConstructContext) constructContext,
+  const(ConstructResult) consumeValueAlreadyCheckedIndex(const(IConstructContext) constructContext,
                                                          const(ConstructObject)[] objects, size_t* index)
   {
     assert(*index < objects.length);
@@ -960,9 +967,9 @@ struct ConstructProcessor
     //
     // Get the next object, if it is a construct, then process it, and use that object
     //
-    auto object = objects[*index].unconst;
+    auto result = ConstructResult(objects[*index].unconst);
     (*index)++;
-    if(auto symbol = object.tryAsConstructSymbol.unconst) {
+    if(auto symbol = result.object.tryAsConstructSymbol.unconst) {
 
       //logDebug("looking up symbol '%s' on line %s...", symbol.value, symbol.lineNumber);
       auto symbolEntries = tryLookupSymbol(symbol.value);
@@ -976,19 +983,19 @@ struct ConstructProcessor
       if(auto definition = symbolEntries.first.tryAsConstructDefinition) {
         //logDev("(inside construct '%s') processing '%s'...", precedence.getOperatorString(), symbol.value);
         if(auto noPatternConstruct = definition.tryAsNoPatternConstruct()) {
-          object = noPatternConstruct.processNoPattern(&this, symbol, null, objects, index).unconst;
+          result = noPatternConstruct.processNoPattern(&this, symbol, null, objects, index).unconst;
         } else {
           auto patternHandlers = definition.getPatternHandlers(null);
           if(patternHandlers is null) {
             throw semanticError(symbol.lineNumber, format
                                 ("the %s construct is missing an object to operate on (it only has 'this' patterns)", symbol.value));
           }
-          object = processPatternConstruct(symbol, definition, false, null, patternHandlers, objects, index).unconst;
+          result = processPatternConstruct(symbol, definition, false, null, patternHandlers, objects, index).unconst;
         }
         //logDev("(inside construct '%s') done processing '%s'...", precedence.getOperatorString(), symbol.value);
 
       } else {
-        object = symbolEntries.first.tryAsConstructObject.unconst;
+        result.object = symbolEntries.first.tryAsConstructObject.unconst;
       }
     }
 
@@ -1041,7 +1048,7 @@ struct ConstructProcessor
       }
 
       // Check if it supports this object
-      auto patternHandlers = definition.getPatternHandlers(object);
+      auto patternHandlers = definition.getPatternHandlers(result.object);
       if(!patternHandlers) {
 	//logDev("construct '%s' is not an operator construct", symbol.value);
 	break; // this construct operator does not support this object
@@ -1049,27 +1056,31 @@ struct ConstructProcessor
 
       (*index)++;
       //logDev("--> %s is an operator construct with a higher precedence", symbol.value);
-      object = processPatternConstruct(symbol, definition, true, object, patternHandlers, objects, index).unconst;
+      result = processPatternConstruct(symbol, definition, true, result.object, patternHandlers, objects, index).unconst;
       //logDev("<-- %s is done being processed", symbol.value);
     }
 
-    return object;
+    return result;
   }
 
 
   const(T) consumeTypedValue(T)(const(ConstructDefinition) constructDefinition, const(ConstructSymbol) constructSymbol,
                                 const(ConstructObject)[] objects, size_t* argIndex) if( !is( T == ConstructSymbol) )
   {
-    auto object = consumeValue(constructDefinition, constructSymbol, objects, argIndex);
-    if(object is null) {
+    auto result = consumeValue(constructDefinition, constructSymbol, objects, argIndex);
+    if(result.hasAction) {
+      throw semanticError(constructSymbol.lineNumber, format
+                          ("the %s construct expects %s but the resulting construct produced a %s action", constructSymbol.value, An(T.staticTypeName), result.action));
+    }
+    if(result.object is null) {
       throw semanticError(constructSymbol.lineNumber, format
                           ("the %s construct expects %s but got no value", constructSymbol.value, An(T.staticTypeName)));
     }
-    auto value = object.tryAs!T;
+    auto value = result.object.tryAs!T;
     if(!value) {
       throw semanticError(constructSymbol.lineNumber, format
                           ("the %s construct expects %s but got %s",
-                           constructSymbol.value, An(T.staticTypeName), An(object.typeName)));
+                           constructSymbol.value, An(T.staticTypeName), An(result.object.typeName)));
     }
     return value;
   }
@@ -1122,7 +1133,7 @@ unittest
   */
 }
 
-alias ProcessorFunc = const(ConstructObject) function(ConstructProcessor* processor,
+alias ProcessorFunc = const(ConstructResult) function(ConstructProcessor* processor,
                                                       const(ConstructDefinition) definition,
                                                       const(ConstructSymbol) constructSymbol,
                                                       const(ConstructObject)[] objects, size_t* argIndex);
@@ -1134,13 +1145,13 @@ class FunctionConstructDefinition : NoPatternConstruct
     super(name, lineNumber, filename, attributes, evalTo);
     this.func = func;
   }
-  final override const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  final override const(ConstructResult) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
 							 const(ConstructObject) opParam, const(ConstructObject)[] objects, size_t* index) const
   {
     return func(processor, this, constructSymbol, objects, index);
   }
 }
-const(ConstructObject) handleConstructWithBlock
+const(ConstructResult) handleConstructWithBlock
 (ConstructProcessor* processor, const(ConstructDefinition) definition, const(ConstructSymbol) constructSymbol,
  Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] args)
 {

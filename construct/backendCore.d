@@ -308,11 +308,34 @@ class NoConstructContext : IConstructContext
   }
 }
 
+struct ConstructResult
+{
+  ConstructObject object;
+  enum Action {
+    none, return_
+  }
+  Action action;
+  const(ConstructResult) withNoReturn() const
+  {
+    if(action == Action.return_) {
+      return const ConstructResult(object);
+    }
+    return this;
+  }
+  @property uint lineNumber() const pure nothrow @nogc @safe
+  {
+    return object ? object.lineNumber : 0;
+  }
+  @property bool noAction() const pure nothrow @nogc @safe { return this.action == Action.none; }
+  @property bool isReturn() const pure nothrow @nogc @safe { return this.action == Action.return_; }
+  @property bool hasAction() const pure nothrow @nogc @safe { return this.action != Action.none; }
+}
 
 union ObjectOrSize
 {
   const(ConstructObject) obj;
   size_t size;
+  const(ConstructResult.Action) action;
   this(const(ConstructObject) obj)
   {
     this.obj = obj;
@@ -321,13 +344,17 @@ union ObjectOrSize
   {
     this.size = size;
   }
+  this(const(ConstructResult.Action) action)
+  {
+    this.action = action;
+  }
 }
 // The ConstructHandler uses a format for it's ConstructObject[] args array based
 // on the pattern nodes. If a pattern node count type is:
 //   case "one"      : the matching ConstructObject should NEVER be null
 //   case "optional" : the matching ConstructObject will be NULL if the value was not present, and non-null if it was present
 //   case "many" and "oneOrMore": the number of values, followed by those values
-alias ConstructHandler = const(ConstructObject) function
+alias ConstructHandler = const(ConstructResult) function
   (ConstructProcessor* processor, const(ConstructDefinition) definition, const(ConstructSymbol) constructSymbol,
    Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] args);
 
@@ -420,7 +447,7 @@ class NoPatternConstruct : ConstructDefinition
   @property final override inout(NoPatternConstruct) tryAsNoPatternConstruct() inout pure nothrow @nogc @safe { return this; }
   @property final override bool hasOperatorPatterns() const { return false; }
   final override const(PatternHandler)[] getPatternHandlers(const(ConstructObject) op) const { return null; }
-  abstract const(ConstructObject) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
+  abstract const(ConstructResult) processNoPattern(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol,
 						   const(ConstructObject) opParam, const(ConstructObject)[] objects, size_t* index) const;
 }
 

@@ -21,24 +21,24 @@ import backend : loadConstructBackend;
 // Their patterns cannot be created from parsing construct pattern string
 // because these patterns are required to create other patterns.
 //
-const(ConstructObject) falseHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
+const(ConstructResult) falseHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
 				    Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
 {
-  return new ConstructBool(constructSymbol.lineNumber, false);
+  return ConstructResult(new ConstructBool(constructSymbol.lineNumber, false));
 }
 immutable falseConstructDefinition = new immutable InternalPatternConstructDefinition
   ("false", [immutable PatternHandler(&falseHandler, null, null)], null, ConstructAttributes.init, null);
-const(ConstructObject) trueHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
+const(ConstructResult) trueHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
                                    Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
 {
-  return new ConstructBool(constructSymbol.lineNumber, true);
+  return ConstructResult(new ConstructBool(constructSymbol.lineNumber, true));
 }
 immutable trueConstructDefinition = new immutable InternalPatternConstructDefinition
   ("true", [immutable PatternHandler(&trueHandler, null, null)], null, ConstructAttributes.init, null);
-const(ConstructObject) nullHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
+const(ConstructResult) nullHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
                                    Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
 {
-  return new ConstructNull(constructSymbol.lineNumber);
+  return ConstructResult(new ConstructNull(constructSymbol.lineNumber));
 }
 immutable nullConstructDefinition = new immutable InternalPatternConstructDefinition
   ("null", [immutable PatternHandler(&nullHandler, null, null)], null, ConstructAttributes.init, null);
@@ -46,7 +46,7 @@ immutable nullConstructDefinition = new immutable InternalPatternConstructDefini
 immutable oneTypePattern = [immutable PatternNode("type", CountType.one, Raw.off, PrimitiveType.type)];
 struct ListOfConstruct
 {
-  private static const(ConstructObject) handler(ConstructProcessor* processor, const(ConstructDefinition) def,
+  private static const(ConstructResult) handler(ConstructProcessor* processor, const(ConstructDefinition) def,
                                                 const(ConstructSymbol) constructSymbol, Object handlerObject,
                                                 const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
 
@@ -54,7 +54,7 @@ struct ListOfConstruct
     assert(objects.length == 1);
     auto type = objects[0].obj.tryAsConstructType;
     assert(type);
-    return new ConstructTypedListType(constructSymbol.lineNumber, type);
+    return ConstructResult(new ConstructTypedListType(constructSymbol.lineNumber, type));
   }
   static immutable definition = new immutable InternalPatternConstructDefinition
     ("listOf", [immutable PatternHandler(&handler, null, oneTypePattern)], null, ConstructAttributes.init, null);
@@ -62,24 +62,22 @@ struct ListOfConstruct
 // I think this has to be defined early because it is used to process constructs
 class DefaultStatementModeConstruct
 {
-  public static const(ConstructObject) handle(ConstructProcessor* processor, const(ConstructObject) result) pure
+  public static const(ConstructResult) handle(ConstructProcessor* processor, const(ConstructObject) object, const(ConstructResult.Action) action) pure
   {
-    if(result) {
-      if(auto return_ = result.tryAsConstructReturn) {
-	return return_;
+    if(object) {
+      if(action != ConstructResult.Action.return_) {
+        throw processor.semanticError(object.lineNumber, format
+                                      ("unhandled statement value (type %s)", object.typeName));
       }
-      throw processor.semanticError(result.lineNumber, format
-				    ("unhandled statement value (type %s)", result.typeName));
-    } else {
-      return null;
     }
+    return ConstructResult(null);
   }
-  private static const(ConstructObject) handler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
+  private static const(ConstructResult) handler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
 					 Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
   {
-    assert(objects.length == 2);
+    assert(objects.length == 3);
     assert(objects[0].size == 0);
-    return handle(processor, objects[1].obj);
+    return handle(processor, objects[1].obj, objects[2].action);
   }
   static immutable definition = new immutable InternalPatternConstructDefinition
     ("defaultStatementMode", [immutable PatternHandler(&handler, null, null)], null, ConstructAttributes.init, null);
@@ -114,7 +112,7 @@ size_t patternNodeArgCount(const(Pattern) pattern) pure
 }
 void genConstructHandlerSignature(PureStringSink sink, const(char)[] funcName, const(Pattern) pattern) pure
 {
-  sink("private static const(ConstructObject) ");
+  sink("private static const(ConstructResult) ");
   sink(funcName);
   sink("(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol");
 
@@ -141,7 +139,7 @@ void generateHandlerThunkFunction(PureStringSink sink, const(char)[] linePrefix,
                                   const(char)[] handlerFunctionName, const(Pattern) pattern) pure
 {
   sink(linePrefix);
-  sink("private static const(ConstructObject) ");
+  sink("private static const(ConstructResult) ");
   sink(name);
   sink("(ConstructProcessor* processor");
   sink(", const(ConstructDefinition) constructDefinition");
@@ -328,7 +326,7 @@ void generateConstructCode(PureStringSink sink, const(ConstructName) constructSy
 mixin(formattedString!(generateConstructCode)
       (ConstructName("pattern"), [ConstructPatternHandler.fromDataStructure!
 				  (q{immutable Pattern(null, [immutable PatternNode("patternList", CountType.one, Raw.on, PrimitiveType.list)])})(q{
-    return new ConstructPattern(patternList.lineNumber, processPattern(processor, definition, patternList));
+   return ConstructResult(new ConstructPattern(patternList.lineNumber, processPattern(processor, definition, patternList)));
 })]));
 
 //
@@ -346,23 +344,25 @@ void generatePatternConstructCode(PureStringSink sink, const(ConstructName) symb
 // These primitives have patterns that rely on the basic primitives
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("let"), "(name raw symbol, value, break_ optional constructBreak)", q{
   processor.addSymbol(name.value, value);
-  return (break_ is null) ? value : null;
+  return const ConstructResult((break_ is null) ? value : null);
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("set"), "(name raw symbol, value, break_ optional constructBreak)", q{
   processor.setSymbol(name.lineNumber, name.value, value);
-  return (break_ is null) ? value : null;
+  return const ConstructResult((break_ is null) ? value : null);
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("letset"), "(name raw symbol, value, break_ optional constructBreak)", q{
   processor.letSetSymbol(name.value, value);
-  return (break_ is null) ? value : null;
+  return const ConstructResult((break_ is null) ? value : null);
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("import"), `(isRelative optional raw "relative", name string)`, q{
   //processor.findAndImport(constructSymbol.lineNumber, name.toUtf8);
   processor.import_(constructSymbol.lineNumber, isRelative !is null, name.toUtf8);
-  return null;
+  return ConstructResult(null);
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("exec"), "(code constructBlock)", q{
-  return processor.processBlock(code.objects);
+  // TODO: should the return action be swallowed or propogate up?
+  throw imp("exec construct");
+  //return processor.processBlock(code.objects).withNoReturn()?;
 }));
 
 mixin(formattedString!(generateConstructCode)
@@ -428,7 +428,7 @@ mixin(formattedString!(generateConstructCode)
       addNewConstruct(processor, cast(string)name.value, constructSymbol.lineNumber,
                       processedPattern, implementation);
     }
-    return null;
+    return ConstructResult(null);
 })]));
 
 private void addNewConstruct(ConstructProcessor* processor, string name, size_t lineNumber,
@@ -455,10 +455,10 @@ private void addNewConstruct(ConstructProcessor* processor, string name, size_t 
 }
 
 mixin(formattedString!(generateConstructCode)
-      (ConstructName("toSymbol"), [ConstructPatternHandler.fromPattern("(string_ string)", "return new ConstructSymbol(string_.lineNumber, string_.toUtf8());")]));
+      (ConstructName("toSymbol"), [ConstructPatternHandler.fromPattern("(string_ string)", "return ConstructResult(new ConstructSymbol(string_.lineNumber, string_.toUtf8()));")]));
 
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("symbolRef"), "(name raw symbol)", q{
-  return name;
+   return const ConstructResult(name);
 }));
 
 mixin(formattedString!(generatePatternConstructCode)
@@ -468,7 +468,7 @@ mixin(formattedString!(generatePatternConstructCode)
     scope(exit) { processor.popScope(); }
     return processor.processBlock(trueCase.objects);
   } else {
-    return null;
+    return ConstructResult(null);
   }
 }));
 /*
@@ -497,7 +497,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("typeof"), "(
 }));
 */
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("isA"), "(this, typeToCheck type)", q{
-  return new ConstructBool(constructSymbol.lineNumber, this_.canBe(typeToCheck));
+      return ConstructResult(new ConstructBool(constructSymbol.lineNumber, this_.canBe(typeToCheck)));
 }));
 
 
@@ -505,16 +505,16 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("isA"), "(thi
 // Operators
 //
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("+", "Plus"), "(this number, right number)", q{
-      return this_.add(right);
+      return const ConstructResult(this_.add(right));
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("*", "Multiply"), "(this number, right number)", q{
-      return this_.multiply(right);
+      return const ConstructResult(this_.multiply(right));
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("==", "Equals"), "(this, right)", q{
-      return new ConstructBool(constructSymbol.lineNumber, this_.equals(right, false));
+      return const ConstructResult(new ConstructBool(constructSymbol.lineNumber, this_.equals(right, false)));
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("!=", "NotEquals"), "(this, right)", q{
-      return new ConstructBool(constructSymbol.lineNumber, !this_.equals(right, false));
+      return const ConstructResult(new ConstructBool(constructSymbol.lineNumber, !this_.equals(right, false)));
 }));
 
 
@@ -522,7 +522,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("assert"), "(
       if(!predicate.value) {
 	throw new ConstructAssertException(constructSymbol.lineNumber, processor, "assertion failed");
       }
-      return null;
+      return ConstructResult(null);
 }));
 
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("throw"), "(message string)", q{
@@ -537,9 +537,12 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("throw"), "(m
   throw new ConstructThrownException(constructSymbol.lineNumber, processor, cast(string)messageBuilder.data);
 }));
 */
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("return"), "(value)", q{
+  return const ConstructResult(value, ConstructResult.Action.return_);
+}));
 
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("not"), "(value predicate)", q{
-      return new ConstructBool(constructSymbol.lineNumber, !value.isTrue);
+      return const ConstructResult(new ConstructBool(constructSymbol.lineNumber, !value.isTrue));
 }));
 // NOTE: should probably be a "dotted" keyword operator
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("itemType"), "(this list)", q{
@@ -547,7 +550,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("itemType"), 
     if(!typeObject) {
       throw imp(format("PrimitiveType %s has no type object configured", this_.itemType));
     }
-    return typeObject;
+    return const ConstructResult(typeObject);
 }));
 
 //
@@ -555,7 +558,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("itemType"), 
 //
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("byteLength"), "(this string, type optional type)", q{
       auto primitiveType = (type is null) ? PrimitiveTypeEnum.utf8 : type.asPrimitive;
-      return new ConstructUint(constructSymbol.lineNumber, this_.stringByteLength(primitiveType));
+      return const ConstructResult(new ConstructUint(constructSymbol.lineNumber, this_.stringByteLength(primitiveType)));
 }));
 mixin(formattedString!(generateConstructCode)
       (ConstructName("strcpy"), [ConstructPatternHandler.fromPattern("(dest pointer, src string, type type)",q{
@@ -565,7 +568,7 @@ mixin(formattedString!(generateConstructCode)
     } else {
       throw imp(format("strcpy pointer (type=%s)", type));
     }
-    return null;
+    return ConstructResult(null);
 }), ConstructPatternHandler.fromPattern("(dest string, src string, type type)", q{
     throw imp("strcpy string");
 })]));
@@ -659,7 +662,7 @@ immutable tryConstructDefinition = new immutable InternalPatternConstructDefinit
 
 immutable tryConstructDefinition = new immutable FunctionConstructDefinition
   ("try", __LINE__, __FILE__, ConstructAttributes.init, null, &tryConstructHandler);
-const(ConstructObject) tryConstructHandler(ConstructProcessor* processor,
+const(ConstructResult) tryConstructHandler(ConstructProcessor* processor,
                                            const(ConstructDefinition) definition,
                                            const(ConstructSymbol) constructSymbol,
                                            const(ConstructObject)[] objects, size_t* argIndex)
@@ -723,7 +726,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("addSymbolsTo
 //
 immutable foreachConstructDefinition = new immutable FunctionConstructDefinition
   ("foreach", __LINE__, __FILE__, ConstructAttributes.init, null, &foreachConstructHandler);
-const(ConstructObject) foreachConstructHandler(ConstructProcessor* processor,
+const(ConstructResult) foreachConstructHandler(ConstructProcessor* processor,
                                            const(ConstructDefinition) definition,
                                            const(ConstructSymbol) constructSymbol,
                                            const(ConstructObject)[] objects, size_t* argIndex)
@@ -768,18 +771,21 @@ const(ConstructObject) foreachConstructHandler(ConstructProcessor* processor,
     if(listIndex >= forEachArgs.items.length) {
       throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list is incomplete");
     }
-    auto object = processor.consumeValueAlreadyCheckedIndex(definition, forEachArgs.items, &listIndex);
-    if(object is null) {
+    auto result = processor.consumeValueAlreadyCheckedIndex(definition, forEachArgs.items, &listIndex);
+    if(result.hasAction) {
+      throw imp("foreach list has an action!");
+    }
+    if(result.object is null) {
       throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list got a void expression");
     }
     if(listIndex < forEachArgs.items.length) {
       throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list has too many items");
     }
 
-    list = object.tryAsConstructList.unconst;
+    list = result.object.tryAsConstructList.unconst;
     if(!list) {
       throw processor.semanticError(constructSymbol.lineNumber, format
-                                    ("foreach requires a list but got %s", An(object.typeName)));
+                                    ("foreach requires a list but got %s", An(result.object.typeName)));
     }
   }
 
@@ -794,10 +800,8 @@ const(ConstructObject) foreachConstructHandler(ConstructProcessor* processor,
     processor.addSymbol(itemVar, list.items[0]);
 
     auto firstResult = processor.processBlock(forEachCode.objects);
-    if(firstResult) {
-      if(auto return_ = firstResult.tryAsConstructReturn) {
-        return firstResult;
-      }
+    if(firstResult.isReturn) {
+      return firstResult;
     }
     foreach(listObject; list.items[1..$]) {
       processor.setSymbol(constructSymbol.lineNumber, itemVar, listObject);
@@ -805,15 +809,13 @@ const(ConstructObject) foreachConstructHandler(ConstructProcessor* processor,
         indexObject.value++;
       }
       auto result = processor.processBlock(forEachCode.objects);
-      if(result) {
-        if(auto return_ = result.tryAsConstructReturn) {
-          return result;
-        }
+      if(result.isReturn) {
+        return result;
       }
     }
   }
 
-  return null;
+  return ConstructResult(null);
 }
 
 //
@@ -831,23 +833,24 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("defStatement
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("createStatementMode"),
 						     "(source raw symbol, result raw symbol, handlerBlock constructBlock)", q{
   ConstructAttributes attributes;
-  return new ConstructStatementMode(constructSymbol.lineNumber, new immutable PatternConstructDefinition
-				    (null, [immutable PatternHandler
-					    (&handleConstructWithBlock, handlerBlock.immutable_,
-					     [immutable PatternNode(source.value, CountType.optional, Raw.off, PrimitiveType.anything),
-					      immutable PatternNode(result.value, CountType.optional, Raw.off, PrimitiveType.anything)])],
-				     null, constructSymbol.lineNumber, cast(string)processor.currentFile.relativeName, attributes, null));
+  return const ConstructResult(new ConstructStatementMode(constructSymbol.lineNumber, new immutable PatternConstructDefinition
+                                                          (null, [immutable PatternHandler
+                                                                  (&handleConstructWithBlock, handlerBlock.immutable_,
+                                                                   [immutable PatternNode(source.value, CountType.optional, Raw.off, PrimitiveType.anything),
+                                                                    immutable PatternNode(result.value, CountType.optional, Raw.off, PrimitiveType.anything),
+                                                                    immutable PatternNode("action", CountType.optional, Raw.off, PrimitiveType.anything)])],
+                                                           null, constructSymbol.lineNumber, cast(string)processor.currentFile.relativeName, attributes, null)));
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("getStatementMode"), "()", q{
-  return processor.statementMode;
+      return const ConstructResult(processor.statementMode);
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("setStatementMode"), "(mode statementMode)", q{
-  processor.setStatementMode(mode);
-  return null;
+      processor.setStatementMode(mode);
+      return const ConstructResult(null);
 }));
 
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("getPatternMode"), "()", q{
-  return new ConstructUtf8(constructSymbol.lineNumber, processor.patternMode.to!string);
+      return const ConstructResult(new ConstructUtf8(constructSymbol.lineNumber, processor.patternMode.to!string));
 }));
 
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("setPatternMode"), "(name raw symbol)", q{
@@ -858,14 +861,14 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("setPatternMo
     throw processor.semanticError(definition.lineNumber, format("unknown pattern node '%s'", name.value));
   }
   processor.setPatternMode(mode);
-  return null;
+  return const ConstructResult(null);
 }));
 
 //
 // Memory Primitives
 //
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("malloc"), "(size uint)", q{
-      return new ConstructPointer(constructSymbol.lineNumber, malloc(size.value));
+      return const ConstructResult(new ConstructPointer(constructSymbol.lineNumber, malloc(size.value)));
 }));
 
 //
@@ -879,7 +882,10 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("class"), "(n
         processor.pushScope(definition.lineNumber, ScopeType.classDef, true);
         scope(exit) { processor.popScope(); }
         auto result = processor.processBlock(definition.objects).unconst;
-        if(result !is null) {
+        if(result.hasAction) {
+          throw imp("class block with an action!");
+        }
+        if(result.object !is null) {
           throw processor.semanticError(definition.lineNumber, "class block cannot return a value");
         }
         classDefScope = processor.currentScope;
@@ -899,11 +905,11 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("class"), "(n
 
       processor.addSymbol(name.value, new ConstructClassDefinition
                           (constructSymbol.lineNumber, cast(string)name.value, classDefScope));
-      return null;
+      return ConstructResult(null);
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("new"), "(className symbol)", q{
       auto classDef = processor.lookupSymbol!ConstructClassDefinition(className);
-      return new ConstructClass(constructSymbol.lineNumber, classDef);
+      return const ConstructResult(new ConstructClass(constructSymbol.lineNumber, classDef));
 }));
 
 mixin(formattedString!(generateConstructCode)
@@ -912,10 +918,10 @@ mixin(formattedString!(generateConstructCode)
         ConstructPatternHandler.fromPattern("(this optionalValue, _ raw \"isPresent\")",q{
             // TODO: return a side affect that affects the type of the symbol
             //       that was passed in.
-            return (this_.value is null) ? ConstructBool.false_ : ConstructBool.true_;
+            return const ConstructResult((this_.value is null) ? ConstructBool.false_ : ConstructBool.true_);
           }),
 	ConstructPatternHandler.fromPattern("(this optionalValue, _ raw \"value\")",q{
-	    return this_.value;
+	    return const ConstructResult(this_.value);
 	  }),
         //ConstructPatternHandler.fromPattern("(symbol symbol)", "return symbol;"),
         //ConstructPatternHandler.fromPattern("(string_ string)", "return new ConstructSymbol(string_.lineNumber, string_.toUtf8());")
@@ -963,5 +969,5 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName(".", "Dot"), 
 //
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("dumpScopeStack"), "()", q{
       processor.printScopeStack();
-      return null;
+      return ConstructResult(null);
 }));

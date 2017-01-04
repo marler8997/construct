@@ -1,0 +1,8 @@
+import relative "../util"
+
+defcon return42() { return 42 }
+
+message return42;
+
+assert 42 == return42
+message "assert == return42 worked!";

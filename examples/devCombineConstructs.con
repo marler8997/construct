@@ -1,7 +1,7 @@
 
-defcon printTheFollowing (value)
+defcon printTheFollowing(value)
 {
-  message value;
+  message "A generic value is: " value;
 }
 
 printTheFollowing 3
@@ -9,7 +9,7 @@ printTheFollowing 3
 {
   defcon printTheFollowing (value number)
   {
-    message "number is " value;
+    message "A number is: " value;
   }
   printTheFollowing 3
 }

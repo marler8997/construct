@@ -8,7 +8,7 @@ import std.conv   : to;
 
 import construct.util;
 import construct.parserCore;
-import construct.backendCore : ConstructType, PrimitiveType, ConstructDefinition, ConstructAttributes,
+import construct.backendCore : ConstructType, ConstructResult, PrimitiveType, ConstructDefinition, ConstructAttributes,
                                PrimitiveTypeEnum, ConstructOptionalValue;
 import construct.processor : ConstructProcessor, ProcessorFunc,
                              FunctionConstructDefinition, logDev;
@@ -41,7 +41,7 @@ ConstructType loadBackendType(const(char)[] name)
   */
   return null;
 }
-const(ConstructObject) messageHandler(ConstructProcessor* processor,
+const(ConstructResult) messageHandler(ConstructProcessor* processor,
                                       const(ConstructDefinition) definition,
                                       const(ConstructSymbol) constructSymbol,
                                       const(ConstructObject)[] objects, size_t* argIndex)
@@ -50,7 +50,13 @@ const(ConstructObject) messageHandler(ConstructProcessor* processor,
   debug {
   OBJECT_LOOP:
     while(true) {
-      auto object = processor.consumeValue(definition, constructSymbol, objects, argIndex).unconst;
+
+      auto result = processor.consumeValue(definition, constructSymbol, objects, argIndex).unconst;
+      if(result.hasAction) {
+        throw processor.semanticError(constructSymbol.lineNumber, "the message construct does not handle action constructs");
+      }
+      ConstructObject object = result.object.unconst;
+      
       while(true) {
         if(object is null) {
           throw processor.semanticError(constructSymbol.lineNumber, "the message construct does not handle void statements");
@@ -91,9 +97,9 @@ const(ConstructObject) messageHandler(ConstructProcessor* processor,
     writeln();
     stdout.flush();
   }
-  return null;
+  return ConstructResult(null);
 }
-const(ConstructObject) openFileHandler(ConstructProcessor* processor,
+const(ConstructResult) openFileHandler(ConstructProcessor* processor,
                                        const(ConstructDefinition) definition,
                                        const(ConstructSymbol) constructSymbol,
                                        const(ConstructObject)[] objects, size_t* argIndex) pure

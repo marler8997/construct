@@ -375,16 +375,20 @@ Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) c
       }
       
       {
-        auto object = processor.consumeValueAlreadyCheckedIndex(constructContext, patternList.items, &itemIndex);
-        if(object is null) {
+        auto result = processor.consumeValueAlreadyCheckedIndex(constructContext, patternList.items, &itemIndex);
+        if(result.hasAction) {
+          throw processor.semanticError(patternList.items[itemIndex].lineNumber,
+                                        format("expected the expression to return a type but returned an action '%s'", result.action));
+        }
+        if(result.object is null) {
           throw processor.semanticError(patternList.items[itemIndex].lineNumber,
                                         "expected the expression to return a type but returned null");
         }
-        if(object.isListBreak) {
+        if(result.object.isListBreak) {
           opType = PrimitiveType.anything.unconst;
           continue;
         }
-        opType = getPatternType(processor, object).unconst;
+        opType = getPatternType(processor, result.object).unconst;
         if(itemIndex >= patternList.items.length) {
           break;
         }
@@ -434,17 +438,21 @@ Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) c
 
     ConstructType type;
     {
-      auto object = processor.consumeValueAlreadyCheckedIndex(constructContext, patternList.items, &itemIndex);
-      if(object is null) {
+      auto result = processor.consumeValueAlreadyCheckedIndex(constructContext, patternList.items, &itemIndex);
+      if(result.hasAction) {
+        throw processor.semanticError(patternList.items[itemIndex].lineNumber,
+                                      format("expected the expression to return a type but returned an action '%s'", result.action));
+      }
+      if(result.object is null) {
 	throw processor.semanticError(patternList.items[itemIndex].lineNumber,
 				      "expected the expression to return a type but returned null");
       }
-      if(object.isListBreak) {
+      if(result.object.isListBreak) {
         appendNode(PatternNode(nodeNameString, countType, raw, PrimitiveType.anything));
 	continue;
       }
 
-      type = getPatternType(processor, object).unconst;
+      type = getPatternType(processor, result.object).unconst;
 
       /*
       // Check that the pattern is valid so far
