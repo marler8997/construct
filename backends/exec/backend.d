@@ -48,56 +48,70 @@ const(ConstructResult) messageHandler(ConstructProcessor* processor,
 {
   // wrap in debug to retain purity
   debug {
-  OBJECT_LOOP:
     while(true) {
-
       auto result = processor.consumeValue(definition, constructSymbol, objects, argIndex).unconst;
       if(result.hasAction) {
         throw processor.semanticError(constructSymbol.lineNumber, "the message construct does not handle action constructs");
       }
-      ConstructObject object = result.object.unconst;
-      
-      while(true) {
-        if(object is null) {
-          throw processor.semanticError(constructSymbol.lineNumber, "the message construct does not handle void statements");
-        }
-        if(auto optionalValue = object.tryAsConstructOptionalValue) {
-          object = optionalValue.value.unconst;
-          if(object is null) {
-            write("<optional-no-value>");
-            continue OBJECT_LOOP;
-          }
-        }
+      if(printObject(processor, constructSymbol, result.object.unconst)) {
         break;
-      }
-
-      if(object.isObjectBreak) {
-        break;
-      } else if(auto string_ = object.tryAsConstructString) {
-        write(string_.toUtf8());
-      } else if(auto number = object.tryAsConstructUint) {
-        writef("%s", number.value);
-      } else if(auto bool_ = object.tryAsConstructBool) {
-        write(bool_.value ? "true" : "false");
-      } else if(auto symbol = object.tryAsConstructSymbol) {
-        write("symbol:");
-        write(symbol.value);
-      } else {
-        {
-          auto nullable = object.tryAsConstructNullable;
-          if(nullable && nullable.isNull) {
-            write("<null>");
-            continue;
-          }
-        }
-
-        throw imp(format("message printing object of type %s", object.typeName));
       }
     }
     writeln();
     stdout.flush();
   }
   return ConstructResult(null);
+}
+// Returns: true if it encountered an object break
+static bool printObject(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol, ConstructObject object)
+{
+  while(true) {
+    if(object is null) {
+      throw processor.semanticError(constructSymbol.lineNumber, "the message construct does not handle void statements");
+    }
+    if(auto optionalValue = object.tryAsConstructOptionalValue) {
+      object = optionalValue.value.unconst;
+      if(object is null) {
+        write("<optional-no-value>");
+        return false;
+      }
+    }
+    break;
+  }
+
+  if(object.isObjectBreak) {
+    return true;
+  }
+
+  if(auto string_ = object.tryAsConstructString) {
+    write(string_.toUtf8());
+  } else if(auto number = object.tryAsConstructUint) {
+    writef("%s", number.value);
+  } else if(auto bool_ = object.tryAsConstructBool) {
+    write(bool_.value ? "true" : "false");
+  } else if(auto symbol = object.tryAsConstructSymbol) {
+    write("symbol:");
+    write(symbol.value);
+  } else if(auto list = object.tryAsConstructList) {
+    write("(");
+    bool atFirst = true;
+    foreach(listItem; list.items) {
+      if(atFirst) atFirst = false; else write(" ");
+      printObject(processor, constructSymbol, listItem.unconst);
+    }
+    write(")");
+  } else {
+    {
+      auto nullable = object.tryAsConstructNullable;
+      if(nullable && nullable.isNull) {
+        write("<null>");
+        return false;
+      }
+    }
+
+    throw imp(format("message printing object of type %s", object.typeName));
+  }
+  return false;
 }
 const(ConstructResult) openFileHandler(ConstructProcessor* processor,
                                        const(ConstructDefinition) definition,

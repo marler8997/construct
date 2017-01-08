@@ -1,0 +1,19 @@
+import relative "../util"
+
+{
+  defcon manyNumbers (numbers many number)
+  {
+    message "manyNumbers got: " numbers;
+  }
+
+  manyNumbers 1 2 3 4
+}
+{
+  defcon oneOrMoreNumbers (numbers oneOrMore number)
+  {
+    message "oneOrMoreNumbers got: " numbers;
+  }
+
+  oneOrMoreNumbers 1 2 3 4
+}
+message "TODO: add more code to test many and oneOrMore countType";

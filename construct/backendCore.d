@@ -349,6 +349,12 @@ union ObjectOrSize
     this.action = action;
   }
 }
+
+// Need to assert this so that ObjectOrSize can be cast to ConstructObject
+enum SizesMatch = ObjectOrSize.sizeof == ConstructObject.sizeof;
+// TODO: add a static assert somehow
+
+
 // The ConstructHandler uses a format for it's ConstructObject[] args array based
 // on the pattern nodes. If a pattern node count type is:
 //   case "one"      : the matching ConstructObject should NEVER be null

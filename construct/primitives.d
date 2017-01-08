@@ -971,3 +971,23 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("dumpScopeSta
       processor.printScopeStack();
       return ConstructResult(null);
 }));
+
+//
+// File System Operations
+//
+// TODO: I want to make a filePath type. Maybe it will inherit from the string type?
+//
+/*
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("buildPath"), "(pathParts oneOrMore string)", q{
+      throw imp("buildPath");
+}));
+*/
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("directoryOf"), "(filePath string)", q{
+      throw imp("directoryOf");
+}));
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("currentSourceFile"), "()", q{
+      throw imp("currentSourceFile");
+}));
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("mkdir"), "(filePath string)", q{
+      throw imp("mkdir");
+}));
