@@ -4,6 +4,7 @@ import core.stdc.stdlib : malloc;
 import std.format : sformat, format, formattedWrite;
 import std.array  : replace;
 import std.conv   : to;
+import std.bigint : BigInt;
 
 import construct.util;
 import construct.logging;
@@ -12,7 +13,7 @@ import construct.backendCore;
 import construct.patterns;
 import construct.processor;
 
-import backend : loadConstructBackend;
+import backend : loadConstructBackend, importBackendPackage, loadBackendType;
 
 //
 // Basic Primitives with no need for a pattern because they have no parameters
@@ -135,6 +136,54 @@ void genConstructHandlerSignature(PureStringSink sink, const(char)[] funcName, c
   }
   sink(")");
 }
+
+
+void sanityCheckConstructArgs(const(PatternNode)[] patternNodes, const(ObjectOrSize)[] args)
+{
+  //logDev("------------- sanityCheckConstructArgs --------------");
+  
+  size_t argumentShift = 0;
+  size_t argumentIndex = 0;
+  foreach(node; patternNodes) {
+    //logDev("Checking node %s", node);
+    if(node.name == "_") {
+      continue; // nameless pattern nodes don't get arguments
+    }
+    
+    if(node.countType.isMultiple) {
+      size_t nodeSizeOffset = argumentShift + argumentIndex;
+      //slogDev("nodeSizeOffset is %s", nodeSizeOffset);
+      if(nodeSizeOffset >= args.length) {
+        logError("CodeBug: not enough arguments for construct pattern, dumping pattern...");
+        printPatternArguments(patternNodes, args);
+        throw new Exception("sanityCheckConstructArgs: not enough arguments for this pattern(1)");
+      }
+      size_t nodeObjectCount = args[nodeSizeOffset].size;
+      argumentShift += nodeObjectCount;
+    }
+    argumentIndex++;
+  }
+  if(argumentShift + argumentIndex != args.length) {
+    logError("CodeBug: expected %d argument(s) for construct pattern but got %d, dumping pattern...", argumentShift+argumentIndex, args.length);
+    printPatternArguments(patternNodes, args);
+    throw new Exception("sanityCheckConstructArgs: not enough arguments for this pattern(2)");
+  }
+}
+
+const(T)[] patternNodeArguments(T)(bool oneOrMore, size_t* runtimeArgOffset,
+                                   size_t patternNodeArgumentIndex, const(ObjectOrSize)[] args) if (is (T == class))
+{
+  size_t nodeSizeOffset = *runtimeArgOffset + patternNodeArgumentIndex;
+  assert(nodeSizeOffset < args.length); // should have already been checked by sanityCheckConstructArgs
+  size_t nodeObjectCount = args[nodeSizeOffset].size;
+  if(nodeObjectCount > 0) {
+    *runtimeArgOffset += nodeObjectCount;
+    assert(nodeSizeOffset + nodeObjectCount < args.length); // should have already been checked by sanityCheckConstructArgs
+    return cast(const(T)[])args[nodeSizeOffset+1..nodeSizeOffset+1+nodeObjectCount];
+  }
+  return null;
+}
+
 void generateHandlerThunkFunction(PureStringSink sink, const(char)[] linePrefix, const(char)[] name,
                                   const(char)[] handlerFunctionName, const(Pattern) pattern) pure
 {
@@ -150,10 +199,19 @@ void generateHandlerThunkFunction(PureStringSink sink, const(char)[] linePrefix,
   sink(linePrefix);
   sink("{\n");
 
+  //sink(linePrefix);
+  //sink("    assert(args.length == ");
+  //formattedWrite(sink, "%s", patternNodeArgCount(pattern));
+  //sink(");\n");
   sink(linePrefix);
-  sink("    assert(args.length == ");
-  formattedWrite(sink, "%s", patternNodeArgCount(pattern));
-  sink(");\n");
+  if(pattern.opType is null) {
+    sink("    sanityCheckConstructArgs(patternNodes, args);\n");
+  } else {
+    sink("    sanityCheckConstructArgs(patternNodes, args[1..$]); /*skip the operator object*/\n");
+  }
+
+  sink(linePrefix);
+  sink("    size_t runtimeArgOffset = 0;\n");
 
   sink(linePrefix);
   sink("    return ");
@@ -164,7 +222,7 @@ void generateHandlerThunkFunction(PureStringSink sink, const(char)[] linePrefix,
   if(pattern.opType !is null) {
     sink(",\n");
     sink(linePrefix);
-    formattedWrite(sink, "        args[%s].obj.enforceAs!%s",
+    formattedWrite(sink, "        args[runtimeArgOffset+%s].obj.enforceAs!%s",
 		   argIndex, pattern.opType.internalValueClass);
     argIndex++;
   }
@@ -175,14 +233,14 @@ void generateHandlerThunkFunction(PureStringSink sink, const(char)[] linePrefix,
       sink(",\n");
       sink(linePrefix);
       if(node.countType == CountType.one) {
-        formattedWrite(sink, "        args[%s].obj.enforceAs!%s", argIndex, typeName);
-        argIndex++;
+        formattedWrite(sink, "        args[runtimeArgOffset+%s].obj.enforceAs!%s", argIndex, typeName);
       } else if(node.countType == CountType.optional) {
-        formattedWrite(sink, "        (args[%s].obj is null) ? null : args[%s].obj.enforceAs!%s", argIndex, argIndex, typeName);
-        argIndex++;
+        formattedWrite(sink, "        (args[runtimeArgOffset+%s].obj is null) ? null : args[%s].obj.enforceAs!%s", argIndex, argIndex, typeName);
       } else {
-        throw imp(format("generateHandlerThunkFunction countType '%s'", node.countType));
+        formattedWrite(sink, "        patternNodeArguments!(%s)(%s, &runtimeArgOffset, %s, args)",
+                       typeName, node.countType == CountType.oneOrMore, argIndex);
       }
+      argIndex++;
     }
   }
 
@@ -491,6 +549,28 @@ const(ConstructObject) ifConstructHandler(ConstructProcessor* processor,
   }
 }
 */
+
+
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("importBackendPackage"),
+     //"(packageName raw symbol, limitList optional pattern(_ \":\", includeSymbolList many raw symbol), _ constructBreak)", q{
+     "(packageName raw symbol, _ constructBreak)", q{
+      importBackendPackage(processor, packageName.value, null);//limitList.includeSymbolList);
+      return ConstructResult(null);
+}));
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("loadBackendType"), "(typeName raw symbol, _ constructBreak)", q{
+      auto backendType = loadBackendType(typeName.value);
+      processor.addSymbol(typeName.value, backendType);
+      return ConstructResult(null);
+}));
+/*
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("makeTypeFrom"), "(parentType type)", q{
+      return ConstructResult(new immutable ConstructUserDefinedType(constructSymbol.lineNumber, parentType.immutable_).unconst);
+}));
+*/
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("deftype"), "(typeName raw symbol, _ raw \"inheritFrom\", parentType type, _ constructBreak)", q{
+      processor.addSymbol(typeName.value, new immutable ConstructUserDefinedType(typeName.lineNumber, typeName.value, parentType.immutable_));
+      return ConstructResult(null);
+}));
 /*
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("typeof"), "(obj)", q{
   return obj.
@@ -525,7 +605,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("assert"), "(
       return ConstructResult(null);
 }));
 
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("throw"), "(message string)", q{
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("throw"), "(message string, _ constructBreak)", q{
     throw new ConstructThrownException(constructSymbol.lineNumber, processor, message.toUtf8());
 }));
 /*
@@ -537,7 +617,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("throw"), "(m
   throw new ConstructThrownException(constructSymbol.lineNumber, processor, cast(string)messageBuilder.data);
 }));
 */
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("return"), "(value)", q{
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("return"), "(value, _ constructBreak)", q{
   return const ConstructResult(value, ConstructResult.Action.return_);
 }));
 
@@ -556,9 +636,34 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("itemType"), 
 //
 // String Operations
 //
+
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("byteLength"), "(this string, type optional type)", q{
       auto primitiveType = (type is null) ? PrimitiveTypeEnum.utf8 : type.asPrimitive;
-      return const ConstructResult(new ConstructUint(constructSymbol.lineNumber, this_.stringByteLength(primitiveType)));
+      return const ConstructResult(new ConstructUint(constructSymbol.lineNumber, BigInt(this_.stringByteLength(primitiveType))));
+}));
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("getUtf8Byte"),
+						     "(str utf8, byteIndex unsigned)", q{
+  if(byteIndex.value >= str.value.length) {
+    throw new ConstructIndexOutOfRangeException(constructSymbol.lineNumber, processor, byteIndex.value);
+  }
+  return const ConstructResult(new ConstructUbyte(constructSymbol.lineNumber, BigInt(cast(ubyte)str.value[byteIndex.value.to!size_t])));
+}));
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("lastIndexOf"), "(this utf8, stringToFind utf8)", q{
+      //logDev("lastIndexOf '%s' '%s'", this_.value, stringToFind.value);
+      BigInt result = void;
+      if(this_.value.length >= stringToFind.value.length) {
+        for(size_t i = this_.value.length - stringToFind.length; ; i--) {
+          if(this_.value[i..i+stringToFind.length] == stringToFind.value) {
+            result = BigInt(i);
+            break;
+          }
+          if(i == 0) {
+            result = BigInt(-1);
+            break;
+          }
+        }
+      }
+      return const ConstructResult(new ConstructInteger(constructSymbol.lineNumber, result));
 }));
 mixin(formattedString!(generateConstructCode)
       (ConstructName("strcpy"), [ConstructPatternHandler.fromPattern("(dest pointer, src string, type type)",q{
@@ -572,6 +677,10 @@ mixin(formattedString!(generateConstructCode)
 }), ConstructPatternHandler.fromPattern("(dest string, src string, type type)", q{
     throw imp("strcpy string");
 })]));
+// TODO: fix this so it works with integer literals
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("slice"), "(this string, start unsigned, limit unsigned)", q{
+      throw imp("slice");
+}));
 
 
 
@@ -794,7 +903,7 @@ const(ConstructResult) foreachConstructHandler(ConstructProcessor* processor,
     ConstructUint indexObject = null;
     scope(exit) { processor.popScope(); }
     if(indexVar) {
-      indexObject = new ConstructUint(forEachArgs.lineNumber, 0);
+      indexObject = new ConstructUint(forEachArgs.lineNumber, BigInt(0));
       processor.addSymbol(indexVar, indexObject);
     }
     processor.addSymbol(itemVar, list.items[0]);
@@ -868,7 +977,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("setPatternMo
 // Memory Primitives
 //
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("malloc"), "(size uint)", q{
-      return const ConstructResult(new ConstructPointer(constructSymbol.lineNumber, malloc(size.value)));
+      return const ConstructResult(new ConstructPointer(constructSymbol.lineNumber, malloc(size.value.to!uint)));
 }));
 
 //
@@ -912,6 +1021,10 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("new"), "(cla
       return const ConstructResult(new ConstructClass(constructSymbol.lineNumber, classDef));
 }));
 
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("-", "Negative"), "(value integer)", q{
+      return const ConstructResult(value.createNegativeVersion(constructSymbol.lineNumber));
+}));
+      
 mixin(formattedString!(generateConstructCode)
       (ConstructName(".", "Dot"),
        [
@@ -975,19 +1088,38 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("dumpScopeSta
 //
 // File System Operations
 //
+
 // TODO: I want to make a filePath type. Maybe it will inherit from the string type?
 //
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("currentSourceFileString"), "()", q{
+      // TODO: Instead of returning ConstructUtf8, return a FilePath type or something
+      return const ConstructResult(new ConstructUtf8(constructSymbol.lineNumber, processor.currentFile.absoluteName));
+}));
 /*
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("buildPath"), "(pathParts oneOrMore string)", q{
+      
       throw imp("buildPath");
 }));
-*/
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("directoryOf"), "(filePath string)", q{
-      throw imp("directoryOf");
+      enum pathSeparator = '\\';
+      auto filePathUtf8 = filePath.toUtf8;
+      if(filePathUtf8.length > 0) {
+        for(auto i = filePathUtf8.length-1; ;i--) {
+          if(filePathUtf8[i] == pathSeparator) {
+            return const ConstructResult(new ConstructUtf8(constructSymbol.lineNumber, filePathUtf8[0..i]));
+          }
+          if(i == 0) {
+            break;
+          }
+        }
+      }
+      return const ConstructResult(new ConstructUtf8(constructSymbol.lineNumber, ""));
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("currentSourceFile"), "()", q{
-      throw imp("currentSourceFile");
+      // TODO: Instead of returning ConstructUtf8, return a FilePath type or something
+      return const ConstructResult(new ConstructUtf8(constructSymbol.lineNumber, processor.currentFile.absoluteName));
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("mkdir"), "(filePath string)", q{
       throw imp("mkdir");
 }));
+*/

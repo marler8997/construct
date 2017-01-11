@@ -15,6 +15,8 @@ import std.array  : appender, Appender;
 import std.file   : read, exists, mkdir;
 import std.path   : baseName, dirName, buildNormalizedPath;
 import std.conv   : to;
+import std.bigint : BigInt;
+
 import construct.util;
 import construct.parserCore;
 
@@ -76,6 +78,7 @@ enum ErrorType {
   invalidChar,
   constructEndedEarly,
   argsWithSameName,
+  unknownEscapeChar,
 }
 class ConstructCFamilyParseException : ConstructParseException
 {
@@ -379,7 +382,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   final const(ConstructObject)[] parse() pure
   {
     if(keepComments) {
-      imp("keep comments");
+      throw imp("keep comments");
     }
     T objects = T.init;
     parse(0, objects);
@@ -523,7 +526,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
       if(c >= '0' && c <= '9') {
         auto numberLineNumber = state.lineNumber;
         auto numberString = parseNumber();
-        objects.put(new ConstructUint(numberLineNumber, to!size_t(numberString)));
+        objects.put(new ConstructIntegerLiteral(numberLineNumber, to!BigInt(numberString)));
         state.next = state.cpos; // rewind
         continue;
       }
@@ -553,6 +556,41 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
        format("expected '%s' but reached end of input", context));
   }
 
+  static string createUnescapedString(size_t lineNumber, string str, size_t escapeRemoveCount)
+  {
+    // Doesn't need to decode to UTF-8 because all escape sequences will be in 1-byte characters only
+    char[] newString = new char[str.length - escapeRemoveCount];
+    size_t newStringIndex = 0;
+    immutable char* limit = str.ptr + str.length;
+    for(auto next = str.ptr; next < limit; next++) {
+      char c = *next;
+      if(c == '\\') {
+        assert(next < limit, "code bug in createUnescapedString");
+        next++;
+        c = *next;
+        if(c == '\\') {
+          c = '\\';
+        } else if(c == '"') {
+          c = '"';
+        } else if(c == 'n') {
+          c = '\n';
+        } else if(c == 't') {
+          c = '\t';
+        } else {
+          throw new ConstructCFamilyParseException(ErrorType.unknownEscapeChar, lineNumber, format
+                                                   ("unknown escape character '%s' (0x%x)", c, c));
+        }
+      }
+      if(newStringIndex >= newString.length) {
+        throw new Exception(format("  string(%s) '%s', escapeRemoveCount %s, newStringIndex %s, c '%s'", str, str.length, escapeRemoveCount, newStringIndex, c));
+      }
+      newString[newStringIndex++] = c;
+    }
+    // sanity checks
+    assert(newStringIndex == newString.length, "code bug in createUnescapedString");
+    return cast(string)newString;
+  }
+  
   // InputState:
   //   next points to character after opening quote
   // OutputState:
@@ -560,6 +598,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   private final string parseQuoted() pure
   {
     auto next = state.next;
+    size_t escapeRemoveCount = 0;
     while(true) {
       if(next >= limit) {
 	throw new ConstructCFamilyParseException
@@ -568,9 +607,19 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
       auto cpos = next;
       auto c = decodeUtf8(&next, limit);
       if(c == '\\') {
-	imp("quoted strings with escapes");
+        if(next >= limit) {
+          throw new ConstructCFamilyParseException
+            (ErrorType.endedEarly, state.lineNumber, "input ended inside a quoted string");
+        }
+        next++;
+        // Note: all escape characters will be 1-byte values so no need
+        //       to decode the escape character as UTF-8
+        escapeRemoveCount++;
       } else if(c == '"') {
-	auto string_ = state.next[0..cpos-state.next];
+        string string_ = state.next[0..cpos-state.next];
+        if(escapeRemoveCount) {
+          string_ = createUnescapedString(state.lineNumber, string_, escapeRemoveCount);
+        }
 	state.next = next;
 	return string_;
       }
@@ -919,6 +968,11 @@ unittest
   testError(ErrorType.endedEarly, "a \"");
   testError(ErrorType.endedEarly, "a \" ");
   test("a \"a string!\";", [symbol(1, "a"), string_(1, "a string!"), break_]);
+  test(`"another string with an escape character \\ "`, [string_(1, `another string with an escape character \ `)]);
+  test(`"\\\"\t\n"`, [string_(1, "\\\"\t\n")]);
+  testError(ErrorType.unknownEscapeChar, `"\c"`);
+  testError(ErrorType.unknownEscapeChar, `"\d"`);
+  testError(ErrorType.unknownEscapeChar, `"\1"`);
 
   // Symbol Strings
   testError(ErrorType.endedEarly, "'");
@@ -1021,26 +1075,26 @@ unittest
   //test("let thrownError = null;", [symbol(1, "let"), named(1, "thrownError", symbol(1, "null")), break_]);
 
   // Numbers
-  test("0", [new ConstructUint(1, 0)]);
-  test(" 0", [new ConstructUint(1, 0)]);
-  test("0 ", [new ConstructUint(1, 0)]);
-  test("1", [new ConstructUint(1, 1)]);
-  test("2", [new ConstructUint(1, 2)]);
-  test("3", [new ConstructUint(1, 3)]);
-  test("4", [new ConstructUint(1, 4)]);
-  test("5", [new ConstructUint(1, 5)]);
-  test("6", [new ConstructUint(1, 6)]);
-  test("7", [new ConstructUint(1, 7)]);
-  test("8", [new ConstructUint(1, 8)]);
-  test("9", [new ConstructUint(1, 9)]);
-  test("10", [new ConstructUint(1, 10)]);
-  test(" 10", [new ConstructUint(1, 10)]);
-  test("10 ", [new ConstructUint(1, 10)]);
+  test("0", [new ConstructIntegerLiteral(1, 0)]);
+  test(" 0", [new ConstructIntegerLiteral(1, 0)]);
+  test("0 ", [new ConstructIntegerLiteral(1, 0)]);
+  test("1", [new ConstructIntegerLiteral(1, 1)]);
+  test("2", [new ConstructIntegerLiteral(1, 2)]);
+  test("3", [new ConstructIntegerLiteral(1, 3)]);
+  test("4", [new ConstructIntegerLiteral(1, 4)]);
+  test("5", [new ConstructIntegerLiteral(1, 5)]);
+  test("6", [new ConstructIntegerLiteral(1, 6)]);
+  test("7", [new ConstructIntegerLiteral(1, 7)]);
+  test("8", [new ConstructIntegerLiteral(1, 8)]);
+  test("9", [new ConstructIntegerLiteral(1, 9)]);
+  test("10", [new ConstructIntegerLiteral(1, 10)]);
+  test(" 10", [new ConstructIntegerLiteral(1, 10)]);
+  test("10 ", [new ConstructIntegerLiteral(1, 10)]);
 
   // Test Operators
   test("a.b", [symbol(1,"a"),symbol(1,"."),symbol(1,"b")]);
-  test("a=0", [symbol(1,"a"),symbol(1,"="),new ConstructUint(1,0)]);
-  test("a = 0", [symbol(1,"a"),symbol(1,"="),new ConstructUint(1,0)]);
+  test("a=0", [symbol(1,"a"),symbol(1,"="),new ConstructIntegerLiteral(1,0)]);
+  test("a = 0", [symbol(1,"a"),symbol(1,"="),new ConstructIntegerLiteral(1,0)]);
 
   // Test C Operators
   test(".",   [symbol(1, ".")]);

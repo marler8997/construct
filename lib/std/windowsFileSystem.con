@@ -1,0 +1,93 @@
+
+//importBackendPackage windowsFileSystem;
+//importBackendPackage windowsFileSystem : fileSystemName;
+//loadBackendType fileSystemName;
+//let fileSystemName makeTypeFrom utf8;
+//loadBackendConstruct currentSourceFile;
+
+//
+// fileSystemName restrictions
+// 1. Does not end with '\'
+// 2. Is not empty
+// 3. Consider normalization restrictions?
+//    - ".." may only appear at the beginning of the path, and only in relative paths
+
+
+//deftype fileSystemName inheritFrom utf8;
+
+defcon currentSourceFile()
+{
+  return currentSourceFileString;
+}
+
+//defcon isRooted(this name fileSystemName)
+defcon isRooted(this utf8)
+{
+  if getUtf8Byte name 0 == "\\" {
+    return true;
+  }
+  if name.length > 2 {
+    if getUtf8Byte name 1 == ":" {
+      return true;
+    }
+  }
+  return false;
+}
+
+//defcon directoryOf(name fileSystemName)
+defcon directoryOf(name utf8)
+{
+  // TODO: remove the last part of the fileSystemName
+  let lastSeparatorIndex   name lastIndexOf "\\";
+  if lastSeparatorIndex == -1 {
+    return name; // This means it was a relative path and we are at the last directory.
+                 // Since we cannot return an empty path, we return the same name.
+  }
+  if lastSeparatorIndex == 0 {
+    return name; // This means we are the absolute root directory
+  }
+  if lastSeparatorIndex == 2 {
+    if getUtf8Byte name 1 == ":" {
+      return name; // This means we are a root drive path like "C:\"
+    }
+  }
+  return name slice 0 lastSeparatorIndex;
+}
+
+//defcon buildPath(pathParts oneOrMore fileSystemName)
+defcon buildPath(pathParts oneOrMore utf8)
+{
+  foreach (pathPart in pathParts) {
+    message "pathPart: " pathPart;
+  }
+  return "somerandompath";
+}
+
+/*
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("currentSourceFile"), "()", q{
+      // TODO: Instead of returning ConstructUtf8, return a FilePath type or something
+      return const ConstructResult(new ConstructUtf8(constructSymbol.lineNumber, processor.currentFile.absoluteName));
+}));
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("buildPath"), "(pathParts oneOrMore string)", q{
+      
+      throw imp("buildPath");
+}));
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("directoryOf"), "(filePath string)", q{
+      enum pathSeparator = '\\';
+      auto filePathUtf8 = filePath.toUtf8;
+      if(filePathUtf8.length > 0) {
+        for(auto i = filePathUtf8.length-1; ;i--) {
+          if(filePathUtf8[i] == pathSeparator) {
+            return const ConstructResult(new ConstructUtf8(constructSymbol.lineNumber, filePathUtf8[0..i]));
+          }
+          if(i == 0) {
+            break;
+          }
+        }
+      }
+      return const ConstructResult(new ConstructUtf8(constructSymbol.lineNumber, ""));
+}));
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("mkdir"), "(filePath string)", q{
+      throw imp("mkdir");
+}));
+*/

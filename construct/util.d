@@ -1,6 +1,7 @@
 module construct.util;
 
 import std.format : formattedWrite;
+import std.traits : isSigned;
 
 alias LineNumber = size_t;
 alias StringSink = scope void delegate(const(char)[]);
@@ -90,6 +91,102 @@ void generateItemCode(string formatArgs, T)(PureStringSink sink, T list, string 
   }
 }
 
+
+
+
+/*
+struct Integer
+{
+  // least significant value
+  private ptrdiff_t lsv;
+  private ptrdiff_t* more;
+  Integer opBinary(string op)(const(Integer) rhs) const
+  {
+    if(this.more !is null || rhs.more !is null) {
+      assert(0, "The Chained template struct with more is not implemented");
+    }
+    static if(op == "+") {
+      // TODO: handle overflow properly
+      return Integer(this.leastSignificant + rhs.leastSignificant);
+    } else static if(op == "*") {
+      // TODO: handle overflow properly
+      return Integer(this.leastSignificant * rhs.leastSignificant);
+    } else static assert(0, "Operator "~op~" not implemented");
+  }
+  int opCmp(const T rhs) const
+  {
+    if(this.more !is null) {
+      assert(0, "The Chained template struct with more is not implemented");
+    }
+    if(this.leastSignificant < rhs) {
+      return -1;
+    } else if(this.leastSignificant > rhs) {
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+}
+*/
+/*
+template AsSigned(T)
+{
+  static if( is(T == ubyte) ) {
+    alias AsSigned = byte;
+  } else static if( is(T == ushort) ) {
+    alias AsSigned = short;
+  } else static if( is(T == uint) ) {
+    alias AsSigned = int;
+  } else static if( is(T == ulong) ) {
+    alias AsSigned = long;
+  } else static assert(0, "AsSigned not implemented for: "~T.stringof);
+}
+
+// Maintains a little-endian ordered
+// list of number values.
+struct Chained(T)
+{
+  private T leastSignificant;
+  private T* more;
+  Chained!T opBinary(string op)(const(Chained!T) rhs) const
+  {
+    if(this.more !is null || rhs.more !is null) {
+      assert(0, "The Chained template struct with more is not implemented");
+    }
+    static if(op == "+") {
+      // TODO: handle overflow properly
+      return Chained!T(this.leastSignificant + rhs.leastSignificant);
+    } else static if(op == "*") {
+      // TODO: handle overflow properly
+      return Chained!T(this.leastSignificant * rhs.leastSignificant);
+    } else static assert(0, "Operator "~op~" not implemented");
+  }
+  int opCmp(const T rhs) const
+  {
+    if(this.more !is null) {
+      assert(0, "The Chained template struct with more is not implemented");
+    }
+    if(this.leastSignificant < rhs) {
+      return -1;
+    } else if(this.leastSignificant > rhs) {
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+  static if(isSigned!T) {
+  } else {
+    @property Chained!(AsSigned!T) toSigned() const pure
+    {
+      if(this.more !is null) {
+	assert(0, "The Chained template struct with more is not implemented");
+      }
+      // TODO: check that leastSignificant is <= AsSigned!T.max
+      return Chained!(AsSigned!T)(cast(AsSigned!T)leastSignificant);
+    }
+  }
+}
+*/
 inout(T)[] filter(T)(inout(T)[] original, inout(T)[] filterValues...) pure nothrow
 {
   size_t length = 0;

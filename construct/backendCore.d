@@ -5,6 +5,7 @@ import std.stdio  : File, Exception, writeln, writefln, stdout;
 import std.array  : Appender, appender;
 import std.conv   : to;
 import std.typecons : BitFlags;
+import std.bigint : BigInt;
 
 import construct.util;
 import construct.logging;
@@ -32,7 +33,8 @@ enum PrimitiveTypeEnum {
   bool_,
   pointer,
   number,
-  integer_,
+  integer,
+  integerLiteral,
   signed,
   int_,
   byte_,
@@ -89,6 +91,7 @@ struct PrimitiveTypeDefinition
     this.internalClassName = internalClassName;
   }
 }
+
 immutable PrimitiveTypeDefinition[] primitiveTypes =
   [
    // NOTE: the anything type must have itself as it's parent
@@ -109,13 +112,14 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
 
    PrimitiveTypeDefinition("pointer"  , PrimitiveTypeEnum.pointer  , PrimitiveTypeEnum.nullable, PrimitiveType.pointer , "ConstructPointer"),
    PrimitiveTypeDefinition("number"   , PrimitiveTypeEnum.number   , PrimitiveTypeEnum.anything, PrimitiveType.number  , "ConstructNumber"),
-   PrimitiveTypeDefinition("integer"  , PrimitiveTypeEnum.integer_ , PrimitiveTypeEnum.number  ),
-   PrimitiveTypeDefinition("signed"   , PrimitiveTypeEnum.signed   , PrimitiveTypeEnum.integer_),
+   PrimitiveTypeDefinition("integer"  , PrimitiveTypeEnum.integer  , PrimitiveTypeEnum.number  , PrimitiveType.integer , "ConstructInteger"),
+   PrimitiveTypeDefinition("integerLiteral", PrimitiveTypeEnum.integerLiteral, PrimitiveTypeEnum.integer  , PrimitiveType.integerLiteral , "ConstructIntegerLiteral"),
+   PrimitiveTypeDefinition("signed"   , PrimitiveTypeEnum.signed   , PrimitiveTypeEnum.integer),
    PrimitiveTypeDefinition("int"      , PrimitiveTypeEnum.int_     , PrimitiveTypeEnum.signed),
    PrimitiveTypeDefinition("byte"     , PrimitiveTypeEnum.byte_    , PrimitiveTypeEnum.signed),
-   PrimitiveTypeDefinition("unsigned" , PrimitiveTypeEnum.unsigned_, PrimitiveTypeEnum.integer_),
-   PrimitiveTypeDefinition("uint"     , PrimitiveTypeEnum.uint_    , PrimitiveTypeEnum.unsigned_, PrimitiveType.uint_  , "ConstructUint"),
-   PrimitiveTypeDefinition("ubyte"    , PrimitiveTypeEnum.ubyte_   , PrimitiveTypeEnum.unsigned_),
+   PrimitiveTypeDefinition("unsigned" , PrimitiveTypeEnum.unsigned_, PrimitiveTypeEnum.integer, PrimitiveType.unsigned_, "ConstructUnsigned"),
+   PrimitiveTypeDefinition("uint"     , PrimitiveTypeEnum.uint_    , PrimitiveTypeEnum.unsigned_, PrimitiveType.uint_   , "ConstructUint"),
+   PrimitiveTypeDefinition("ubyte"    , PrimitiveTypeEnum.ubyte_   , PrimitiveTypeEnum.unsigned_, PrimitiveType.ubyte_  , "ConstructUbyte"),
    PrimitiveTypeDefinition("uni"      , PrimitiveTypeEnum.uni      , PrimitiveTypeEnum.anything),
 
    PrimitiveTypeDefinition("construct"     , PrimitiveTypeEnum.construct     , PrimitiveTypeEnum.anything, null, "ConstructDefinition"),
@@ -249,6 +253,7 @@ PrimitiveType create(PrimitiveTypeEnum typeEnum, size_t lineNumber)
 {
   return new PrimitiveType(lineNumber, typeEnum);
 }
+
 
 //
 // Initialize Precedence Table
@@ -568,24 +573,6 @@ class PrimitiveType : ConstructType
     sink("PrimitiveType.");
     sink(typeEnum.to!string);
   }
-  /*
-  @property final override string internalValueClassIfRequired() const pure
-  {
-    auto name = typeEnum.definition().internalClassName;
-    if(!name) {
-      throw imp(format("type enum '%s' has no internalClassName configured", typeEnum));
-    }
-    return name;
-  }
-  @property final override string internalValueClassIfOptional() const pure
-  {
-    auto name = typeEnum.definition().internalClassName;
-    if(!name) {
-      throw imp(format("type enum '%s' has no internalClassName configured", typeEnum));
-    }
-    return name;
-  }
-  */
   @property final override string internalValueClass() const pure
   {
     auto name = typeEnum.definition().internalClassName;
@@ -624,7 +611,11 @@ class PrimitiveType : ConstructType
   static immutable predicate      = new PrimitiveType(0, PrimitiveTypeEnum.predicate);
   static immutable bool_          = new PrimitiveType(0, PrimitiveTypeEnum.bool_);
   static immutable number         = new PrimitiveType(0, PrimitiveTypeEnum.number);
+  static immutable integer        = new PrimitiveType(0, PrimitiveTypeEnum.integer);
+  static immutable integerLiteral = new PrimitiveType(0, PrimitiveTypeEnum.integerLiteral);
+  static immutable unsigned_      = new PrimitiveType(0, PrimitiveTypeEnum.unsigned_);
   static immutable uint_          = new PrimitiveType(0, PrimitiveTypeEnum.uint_);
+  static immutable ubyte_         = new PrimitiveType(0, PrimitiveTypeEnum.ubyte_);
   static immutable string_        = new PrimitiveType(0, PrimitiveTypeEnum.string_);
   static immutable utf8           = new PrimitiveType(0, PrimitiveTypeEnum.utf8);
   static immutable symbol         = new PrimitiveType(0, PrimitiveTypeEnum.symbol);
@@ -646,7 +637,7 @@ class KeywordType : ConstructType
   this(size_t lineNumber, string keyword) inout pure
   {
     super(lineNumber);
-    // TODO: I could validate that the keywors is a valid symbol,
+    // TODO: I could validate that the keyword is a valid symbol,
     //       or use another constructor that passes in a symbol that's
     //       already been verified to be valid
     this.keyword = keyword;
@@ -666,8 +657,6 @@ class KeywordType : ConstructType
     sink(keyword);
     sink("\")");
   }
-  //@property final override string internalValueClassIfRequired() const pure { return null;  }
-  //@property final override string internalValueClassIfOptional() const pure { return "ConstructSymbol";  }
   @property final override string internalValueClass() const pure { return "ConstructSymbol";  }
 
   @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.symbol; }
@@ -691,6 +680,86 @@ class KeywordType : ConstructType
   final bool typedEquals(const(KeywordType) other) const pure
   {
     return this.keyword == other.keyword;
+  }
+}
+class ConstructUserDefinedType : ConstructType
+{
+  string name;
+  immutable(ConstructType) parentType;
+  this(size_t lineNumber, string name, immutable(ConstructType) parentType) immutable pure
+  {
+    super(lineNumber);
+    this.name = name;
+    this.parentType = parentType;
+  }
+
+  mixin virtualTypeNameMembers!"type";
+  mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.type);
+
+  @property final override string tryAsKeyword() const pure { return null; }
+
+  final override void writePattern(PureStringSink sink) const
+  {
+    throw imp("ConstructUserDefinedType writePattern");
+    // Every primitive type should be in the symbol table
+    // with their name mapped to it
+    //sink(typeEnum.definition.name);
+  }
+  final override void writeInternalFactoryCode(PureStringSink sink) const
+  {
+    throw imp("ConstructUserDefinedType writerInternalFactoryCode");
+    //sink("PrimitiveType.");
+    //sink(typeEnum.to!string);
+  }
+  
+  @property final override string internalValueClass() const pure
+  {
+    throw imp("ConstructUserDefinedType internalValueClass");
+    /*
+    auto name = typeEnum.definition().internalClassName;
+    if(!name) {
+      throw imp(format("type enum '%s' has no internalClassName configured", typeEnum));
+    }
+    return name;
+    */
+  }
+
+  @property final override PrimitiveTypeEnum asPrimitive() const pure
+  {
+    throw imp("ConstructUserDefinedType asPrimitive");
+    //return typeEnum;
+  }
+
+  final override bool supportsValue(const(ConstructObject) obj) const pure
+  {
+    throw imp("ConstructUserDefinedType supportsValue");
+    //return obj.primitiveTypeEnum.canBe(typeEnum);
+  }
+  final override TypeMatch matchValue(const(ConstructObject) obj) const
+  {
+    throw imp("ConstructUserDefinedType matchValue");
+    /*
+    if(obj.primitiveTypeEnum == typeEnum) {
+      return TypeMatch.exact;
+    }
+    if(obj.primitiveTypeEnum.canBe(typeEnum)) {
+      return TypeMatch.subtype;
+    }
+    return TypeMatch.not;
+    */
+  }
+
+  mixin virtualEqualsMember!ConstructUserDefinedType;
+  final bool typedEquals(const(ConstructUserDefinedType) other) const pure
+  {
+    return other && this.parentType.equals(other.parentType);
+  }
+
+  override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    sink("UserDefinedTypeFrom[");
+    parentType.toString(sink);
+    sink("]");
   }
 }
 class ConstructPattern : ConstructType
@@ -754,7 +823,7 @@ class ConstructClassDefinition : ConstructType
   Scope scope_;
   this(size_t lineNumber, string name, Scope scope_) pure
   {
-    super(lineNumber);
+ super(lineNumber);
     this.name = name;
     this.scope_ = scope_;
   }
@@ -1096,8 +1165,173 @@ class ConstructNumber : ConstructObject
   enum processorValueType = "ConstructNumber";
   @property final override inout(ConstructNumber) tryAsConstructNumber() inout pure { return this; }
 
-  abstract const(ConstructNumber) add(const(ConstructNumber) other) const pure;
-  abstract const(ConstructNumber) multiply(const(ConstructNumber) other) const pure;
+  abstract const(ConstructNumber) createNegativeVersion(size_t lineNumber) const;
+  abstract const(ConstructNumber) add(const(ConstructNumber) other) const;
+  abstract const(ConstructNumber) multiply(const(ConstructNumber) other) const;
+}
+class ConstructInteger : ConstructNumber
+{
+  BigInt value;
+  this(size_t lineNumber, BigInt value) pure
+  {
+    super(lineNumber);
+    this.value = value;
+  }
+
+  mixin virtualTypeNameMembers!"integer";
+  mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.integer);
+
+  enum processorValueType = "ConstructInteger";
+  @property final override inout(ConstructInteger) tryAsConstructInteger() inout pure { return this; }
+
+  override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    formattedWrite(sink, "%s", value);
+  }
+
+  mixin virtualEqualsMember!ConstructInteger;
+  final bool typedEquals(const(ConstructInteger) other) const pure
+  {
+    return value == other.value;
+  }
+  override const(ConstructNumber) createNegativeVersion(size_t lineNumber) const
+  {
+    return new ConstructInteger(lineNumber, -value);
+  }
+  override const(ConstructNumber) add(const(ConstructNumber) other) const
+  {
+    if(auto otherUnsigned = other.tryAsConstructInteger) {
+      return new ConstructInteger(0, this.value + otherUnsigned.value);
+    }
+    throw imp(format("add %s to %s", typeName, other.typeName));
+  }
+  override const(ConstructNumber) multiply(const(ConstructNumber) other) const
+  {
+    if(auto otherUnsigned = other.tryAsConstructInteger) {
+      return new ConstructInteger(0, value * otherUnsigned.value);
+    }
+    throw imp(format("add %s to %s", typeName, other.typeName));
+  }
+}
+class ConstructUnsigned : ConstructInteger
+{
+  this(size_t lineNumber, BigInt value) pure
+  {
+    super(lineNumber, value);
+    if(value < 0) {
+      //throw new Exception(format("ConstructUnsigned class constructed with negative value: %s", value));
+      throw new Exception("ConstructUnsigned constructed with a negative value!");
+    }
+  }
+
+  mixin virtualTypeNameMembers!"unsigned";
+  mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.unsigned_);
+
+  enum processorValueType = "ConstructUnsigned";
+
+  mixin virtualEqualsMember!ConstructUnsigned;
+  final bool typedEquals(const(ConstructUnsigned) other) const pure
+  {
+    return value == other.value;
+  }
+  override const(ConstructNumber) createNegativeVersion(size_t lineNumber) const
+  {
+    throw new Exception("createNegativeVersion called on ConstructUnsigned");
+  }
+  /*
+  override const(ConstructNumber) add(const(ConstructNumber) other) const
+  {
+    if(auto otherUnsigned = other.tryAsConstructUnsigned) {
+      return new ConstructUnsigned(0, this.value + otherUnsigned.value);
+    }
+    throw imp(format("add %s to %s", typeName, other.typeName));
+  }
+  override const(ConstructNumber) multiply(const(ConstructNumber) other) const
+  {
+    if(auto otherUnsigned = other.tryAsConstructUnsigned) {
+      return new ConstructUnsigned(0, value * otherUnsigned.value);
+    }
+    throw imp(format("add %s to %s", typeName, other.typeName));
+  }
+  */
+}
+class ConstructUint : ConstructUnsigned
+{
+  this(size_t lineNumber, BigInt value)
+  {
+    if(value < uint.min || value >= uint.max) {
+      throw new Exception("ConstructUint class constructed with value out of range: "~value.to!string);
+    }
+    super(lineNumber, value);
+  }
+
+  mixin finalTypeNameMembers!"uint";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.uint_);
+
+  enum processorValueType = "ConstructUint";
+
+  @property final override inout(ConstructUint) tryAsConstructUint() inout pure { return this; }
+
+  final override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    formattedWrite(sink, "%s", value);
+  }
+  mixin virtualEqualsMember!ConstructUint;
+  final bool typedEquals(const(ConstructUint) other) const pure
+  {
+    return value == other.value;
+  }
+  final override const(ConstructNumber) add(const(ConstructNumber) other) const
+  {
+    if(auto otherUint = other.tryAsConstructUint) {
+      return new ConstructUint(0, value + otherUint.value);
+    }
+    throw imp(format("add %s to %s", typeName, other.typeName));
+  }
+  final override const(ConstructNumber) multiply(const(ConstructNumber) other) const
+  {
+    if(auto otherUint = other.tryAsConstructUint) {
+      return new ConstructUint(0, value * otherUint.value);
+    }
+    throw imp(format("add %s to %s", typeName, other.typeName));
+  }
+}
+class ConstructUbyte : ConstructInteger
+{
+  this(size_t lineNumber, BigInt value)
+  {
+    super(lineNumber, value);
+    if(value < 0) {
+      throw new Exception(format("ConstructUbyte class constructed with negative value %s", value));
+    }
+  }
+
+  mixin virtualTypeNameMembers!"ubyte";
+  mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.ubyte_);
+
+  enum processorValueType = "ConstructUbyte";
+
+  mixin virtualEqualsMember!ConstructUbyte;
+  final bool typedEquals(const(ConstructUbyte) other) const pure
+  {
+    return value == other.value;
+  }
+  /*
+  override const(ConstructUbyte) add(const(ConstructUbyte) other) const
+  {
+    if(auto otherUnsigned = other.tryAsConstructUnsigned) {
+      return new ConstructUnsigned(0, this.value + otherUnsigned.value);
+    }
+    throw imp(format("add %s to %s", typeName, other.typeName));
+  }
+  override const(ConstructUbyte) multiply(const(ConstructUbyte) other) const
+  {
+    if(auto otherUnsigned = other.tryAsConstructUnsigned) {
+      return new ConstructUnsigned(0, value * otherUnsigned.value);
+    }
+    throw imp(format("add %s to %s", typeName, other.typeName));
+  }
+  */
 }
 class ConstructPointer : ConstructNullable
 {

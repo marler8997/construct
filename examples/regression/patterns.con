@@ -41,15 +41,15 @@ import relative "../util"
 // Test Optional Patterns
 //
 {
-  defcon optionalUint(num optional uint, _ constructBreak)
+  defcon optionalInteger(num optional integer, _ constructBreak)
   {
     if num.isPresent {
-      message "optionalUint: " num;
+      message "optionalInteger: " num;
     }
     if not num.isPresent {
-      message "optionalUint: not present";
+      message "optionalInteger: not present";
     }
   }
-  optionalUint 3;
-  optionalUint;
+  optionalInteger 3;
+  optionalInteger;
 }

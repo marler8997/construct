@@ -8,7 +8,8 @@ import std.conv   : to;
 
 import construct.util;
 import construct.parserCore;
-import construct.backendCore : ConstructType, ConstructResult, PrimitiveType, ConstructDefinition, ConstructAttributes,
+import construct.backendCore : ConstructType, ConstructResult, PrimitiveType, ConstructUserDefinedType,
+                               ConstructDefinition, ConstructAttributes,
                                PrimitiveTypeEnum, ConstructOptionalValue;
 import construct.processor : ConstructProcessor, ProcessorFunc,
                              FunctionConstructDefinition, logDev;
@@ -29,7 +30,13 @@ ProcessorFunc loadConstructBackend(const(char)[] name) pure
   }
   return null;
 }
-ConstructType loadBackendType(const(char)[] name)
+
+void importBackendPackage(ConstructProcessor* processor, const(char)[] packageName, const(char)[][] limitList)
+{
+  throw new Exception(format("this backend does not have package '%s'", packageName));
+}
+
+immutable(ConstructType) loadBackendType(const(char)[] name)
 {
   /*
   if(name == "systemString") {
@@ -85,8 +92,8 @@ static bool printObject(ConstructProcessor* processor, const(ConstructSymbol) co
 
   if(auto string_ = object.tryAsConstructString) {
     write(string_.toUtf8());
-  } else if(auto number = object.tryAsConstructUint) {
-    writef("%s", number.value);
+  } else if(auto integer = object.tryAsConstructInteger) {
+    writef("%s", integer.value);
   } else if(auto bool_ = object.tryAsConstructBool) {
     write(bool_.value ? "true" : "false");
   } else if(auto symbol = object.tryAsConstructSymbol) {

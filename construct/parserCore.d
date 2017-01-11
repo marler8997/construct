@@ -1,11 +1,14 @@
 module construct.parserCore;
 
-import std.format   : format, formattedWrite;
-import std.array    : Appender;
+import std.format : format, formattedWrite;
+import std.array  : Appender;
+import std.bigint : BigInt;
+
 import construct.util;
 import construct.logging;
 import construct.patterns    : PatternNode;
-import construct.backendCore : PrimitiveTypeEnum, ConstructDefinition, ConstructNumber,
+import construct.backendCore : PrimitiveTypeEnum, ConstructDefinition,
+                               ConstructNumber, ConstructInteger, ConstructUnsigned, ConstructUint,
                                ConstructPredicate, ConstructBool, ConstructNullable,
                                ConstructType, ConstructOptionalValue, definition, commonType, canBe,
                                ConstructPattern, ConstructClassDefinition, ConstructClass,
@@ -29,6 +32,8 @@ enum ConstructClasses =
    "ConstructPredicate",
    "ConstructBool",
    "ConstructNumber",
+   "ConstructInteger",
+   "ConstructUnsigned",
    "ConstructUint",
    "ConstructBlock",
    "ConstructList",
@@ -280,45 +285,47 @@ class ConstructSymbol : ConstructObject
     return value == other.value;
   }
 }
-class ConstructUint : ConstructNumber
+class ConstructIntegerLiteral : ConstructInteger
 {
-  size_t value;
+  this(size_t lineNumber, BigInt value) pure
+  {
+    super(lineNumber, value);
+  }
   this(size_t lineNumber, size_t value) pure
   {
-    super(lineNumber);
-    this.value = value;
+    super(lineNumber, BigInt(value));
   }
 
-  mixin finalTypeNameMembers!"uint";
-  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.uint_);
+  mixin virtualTypeNameMembers!"integerLiteral";
+  mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.integerLiteral);
 
-  enum processorValueType = "ConstructUint";
+  enum processorValueType = "ConstructIntegerLiteral";
 
-  @property final override inout(ConstructUint) tryAsConstructUint() inout pure { return this; }
-
-  final override void toString(scope void delegate(const(char)[]) sink) const
-  {
-    formattedWrite(sink, "%s", value);
-  }
-  mixin virtualEqualsMember!ConstructUint;
-  final bool typedEquals(const(ConstructUint) other) const pure
+  mixin virtualEqualsMember!ConstructIntegerLiteral;
+  final bool typedEquals(const(ConstructIntegerLiteral) other) const pure
   {
     return value == other.value;
   }
-  final override const(ConstructNumber) add(const(ConstructNumber) other) const pure
+  override const(ConstructNumber) createNegativeVersion(size_t lineNumber) const
   {
-    if(auto otherUint = other.tryAsConstructUint) {
-      return new ConstructUint(0, value + otherUint.value);
+    return new ConstructIntegerLiteral(lineNumber, -value);
+  }
+  /*
+  override const(ConstructNumber) add(const(ConstructNumber) other) const
+  {
+    if(auto otherIntegerLiteral = other.tryAsConstructIntegerLiteral) {
+      return new ConstructIntegerLiteral(0, this.value + otherIntegerLiteral.value);
     }
     throw imp(format("add %s to %s", typeName, other.typeName));
   }
-  final override const(ConstructNumber) multiply(const(ConstructNumber) other) const pure
+  override const(ConstructNumber) multiply(const(ConstructNumber) other) const
   {
-    if(auto otherUint = other.tryAsConstructUint) {
-      return new ConstructUint(0, value * otherUint.value);
+    if(auto otherIntegerLiteral = other.tryAsConstructIntegerLiteral) {
+      return new ConstructIntegerLiteral(0, value * otherIntegerLiteral.value);
     }
     throw imp(format("add %s to %s", typeName, other.typeName));
   }
+  */
 }
 class ConstructBlock : ConstructObject
 {

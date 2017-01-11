@@ -85,9 +85,13 @@ int main(string[] args)
     return 1;
   }
 
-  ImportPath[] importPaths = new ImportPath[importPathStrings.length+1];
+  ImportPath[] importPaths = new ImportPath[2 + importPathStrings.length];
   importPaths[0] = ImportPath(constructFile.relativeName.dirName,
                               constructFile.absoluteName.dirName);
+  {
+    string libraryPath = buildNormalizedPath(__FILE_FULL_PATH__.dirName, "lib");
+    importPaths[1] = ImportPath(libraryPath, libraryPath);
+  }
   foreach(i, importPathString; importPathStrings) {
     if(!exists(importPathString)) {
       writefln("Error: import path '%s' does not exist", importPathString);
@@ -96,7 +100,7 @@ int main(string[] args)
     auto normalizedPath = buildNormalizedPath(importPathString);
     logDebug("import path '%s' normalized to '%s'", importPathString, normalizedPath);
     auto absoluteNormalizedPath = normalizedPath.absolutePath.buildNormalizedPath;
-    importPaths[i+1] = ImportPath(normalizedPath, absoluteNormalizedPath);
+    importPaths[2 + i] = ImportPath(normalizedPath, absoluteNormalizedPath);
   }
   
   ConstructProcessor processor = ConstructProcessor(importPaths);

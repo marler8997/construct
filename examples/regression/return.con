@@ -1,6 +1,6 @@
 import relative "../util"
 
-defcon return42() { return 42 }
+defcon return42() { return 42; }
 
 message return42;
 

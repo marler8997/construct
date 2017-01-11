@@ -520,15 +520,15 @@ unittest
   }
   testGoodPattern("(s           symbol)");
   testGoodPattern("(s one       symbol)");
-  testBadPattern( "(s optional  symbol)");
-  testBadPattern( "(s many      symbol)");
-  testBadPattern( "(s oneOrMore symbol)");
+  //testBadPattern( "(s optional  symbol)");
+  //testBadPattern( "(s many      symbol)");
+  //testBadPattern( "(s oneOrMore symbol)");
 
   testGoodPattern("(x          , s symbol)");
   testGoodPattern("(x one      , s symbol)");
-  testBadPattern( "(x optional , s symbol)");
-  testBadPattern( "(x many     , s symbol)");
-  testBadPattern( "(x oneOrMore, s symbol)");
+  //testBadPattern( "(x optional , s symbol)");
+  //testBadPattern( "(x many     , s symbol)");
+  //testBadPattern( "(x oneOrMore, s symbol)");
 }
 
 unittest
@@ -550,36 +550,36 @@ unittest
   }
   auto variants =
     [
-     StringPatternPair("aName"                   , immutable PatternNode("aName", CountType.one, PrimitiveType.anything)),
-     StringPatternPair("aName one"               , immutable PatternNode("aName", CountType.one, PrimitiveType.anything)),
-     StringPatternPair("aName anything"          , immutable PatternNode("aName", CountType.one, PrimitiveType.anything)),
-     StringPatternPair("aName one anything"      , immutable PatternNode("aName", CountType.one, PrimitiveType.anything)),
+     StringPatternPair("aName"                   , immutable PatternNode("aName", CountType.one, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("aName one"               , immutable PatternNode("aName", CountType.one, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("aName anything"          , immutable PatternNode("aName", CountType.one, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("aName one anything"      , immutable PatternNode("aName", CountType.one, Raw.off, PrimitiveType.anything)),
 
-     StringPatternPair("_"                       , immutable PatternNode("_", CountType.one, PrimitiveType.anything)),
-     StringPatternPair("_ one"                   , immutable PatternNode("_", CountType.one, PrimitiveType.anything)),
-     StringPatternPair("_ anything"              , immutable PatternNode("_", CountType.one, PrimitiveType.anything)),
-     StringPatternPair("_ one anything"          , immutable PatternNode("_", CountType.one, PrimitiveType.anything)),
+     StringPatternPair("_"                       , immutable PatternNode("_", CountType.one, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("_ one"                   , immutable PatternNode("_", CountType.one, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("_ anything"              , immutable PatternNode("_", CountType.one, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("_ one anything"          , immutable PatternNode("_", CountType.one, Raw.off, PrimitiveType.anything)),
 
-     StringPatternPair("aName optional"          , immutable PatternNode("aName", CountType.optional, PrimitiveType.anything)),
-     StringPatternPair("aName optional anything" , immutable PatternNode("aName", CountType.optional, PrimitiveType.anything)),
+     StringPatternPair("aName optional"          , immutable PatternNode("aName", CountType.optional, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("aName optional anything" , immutable PatternNode("aName", CountType.optional, Raw.off, PrimitiveType.anything)),
 
-     StringPatternPair("aName many"              , immutable PatternNode("aName", CountType.many, PrimitiveType.anything)),
-     StringPatternPair("aName many anything"     , immutable PatternNode("aName", CountType.many, PrimitiveType.anything)),
+     StringPatternPair("aName many"              , immutable PatternNode("aName", CountType.many, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("aName many anything"     , immutable PatternNode("aName", CountType.many, Raw.off, PrimitiveType.anything)),
 
-     StringPatternPair("aName oneOrMore"         , immutable PatternNode("aName", CountType.oneOrMore, PrimitiveType.anything)),
-     StringPatternPair("aName oneOrMore anything", immutable PatternNode("aName", CountType.oneOrMore, PrimitiveType.anything)),
+     StringPatternPair("aName oneOrMore"         , immutable PatternNode("aName", CountType.oneOrMore, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("aName oneOrMore anything", immutable PatternNode("aName", CountType.oneOrMore, Raw.off, PrimitiveType.anything)),
 
-     StringPatternPair("aName string"            , immutable PatternNode("aName", CountType.one, PrimitiveType.string_)),
-     StringPatternPair("aName one string"        , immutable PatternNode("aName", CountType.one, PrimitiveType.string_)),
+     StringPatternPair("aName string"            , immutable PatternNode("aName", CountType.one, Raw.off, PrimitiveType.string_)),
+     StringPatternPair("aName one string"        , immutable PatternNode("aName", CountType.one, Raw.off, PrimitiveType.string_)),
 
-     StringPatternPair("_ string"                , immutable PatternNode("_", CountType.one, PrimitiveType.string_)),
-     StringPatternPair("_ one string"            , immutable PatternNode("_", CountType.one, PrimitiveType.string_)),
+     StringPatternPair("_ string"                , immutable PatternNode("_", CountType.one, Raw.off, PrimitiveType.string_)),
+     StringPatternPair("_ one string"            , immutable PatternNode("_", CountType.one, Raw.off, PrimitiveType.string_)),
 
-     StringPatternPair("aName optional string"   , immutable PatternNode("aName", CountType.optional, PrimitiveType.string_)),
+     StringPatternPair("aName optional string"   , immutable PatternNode("aName", CountType.optional, Raw.off, PrimitiveType.string_)),
 
-     StringPatternPair("aName many string"       , immutable PatternNode("aName", CountType.many, PrimitiveType.string_)),
+     StringPatternPair("aName many string"       , immutable PatternNode("aName", CountType.many, Raw.off, PrimitiveType.string_)),
 
-     StringPatternPair("aName oneOrMore string"  , immutable PatternNode("aName", CountType.oneOrMore, PrimitiveType.string_)),
+     StringPatternPair("aName oneOrMore string"  , immutable PatternNode("aName", CountType.oneOrMore, Raw.off, PrimitiveType.string_)),
      ];
 
   foreach(variant; variants) {
@@ -793,3 +793,4 @@ unittest
   */
   logDev("Success");
 }
+
