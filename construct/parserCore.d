@@ -9,10 +9,11 @@ import construct.logging;
 import construct.patterns    : PatternNode;
 import construct.backendCore : PrimitiveTypeEnum, ConstructDefinition,
                                ConstructNumber, ConstructInteger, ConstructUnsigned, ConstructUint,
-                               ConstructPredicate, ConstructBool, ConstructNullable,
-                               ConstructType, ConstructOptionalValue, definition, commonType, canBe,
+                               ConstructPredicate, ConstructBool, ConstructNullable, ConstructTuple,
+                               ConstructType, ConstructOptionalValue, ConstructList,
+                               definition, commonType, canBe,
                                ConstructPattern, ConstructClassDefinition, ConstructClass,
-                               ConstructStatementMode,
+                               ConstructStatementMode, ConstructPatternNode,
                                ConstructReturn, ConstructPointer, ConstructArray, ConstructString;
 import construct.processor   : ConstructProcessor;
 
@@ -21,7 +22,6 @@ enum ConstructClasses =
    "ConstructDefinition",
    "ConstructType",
    "ConstructReturn",
-   "ObjectBreak",
    "ConstructOptionalValue",
    "ConstructNullable",
    "ConstructPointer",
@@ -35,12 +35,17 @@ enum ConstructClasses =
    "ConstructInteger",
    "ConstructUnsigned",
    "ConstructUint",
-   "ConstructBlock",
    "ConstructList",
+   "ConstructDelimitedList",
+   "ConstructBlock",
+   "ConstructParenList",
+   "ConstructBracketList",
+   "ConstructTuple",
    "ConstructPattern",
    "ConstructClassDefinition",
    "ConstructClass",
-   "ConstructStatementMode"];
+   "ConstructStatementMode",
+   "ConstructPatternNode"];
 
 class ConstructException : Exception
 {
@@ -105,7 +110,6 @@ mixin template virtualEqualsMember(alias Class)
     return other && this.typedEquals(other);
   }
 }
-
 abstract class ConstructObject
 {
   size_t lineNumber;
@@ -136,16 +140,7 @@ abstract class ConstructObject
     return primitiveTypeEnum.canBe(type.asPrimitive());
   }
 
-  @property
-  final bool isObjectBreak() const pure
-  {
-    return typeid(this) is typeid(ObjectBreak);
-  }
-  @property
-  final bool isListBreak() const pure
-  {
-    return typeid(this) is typeid(ListBreak);
-  }
+  bool isSymbolOf(const(char)[] symbol) const pure { return false; }
 
   @property final inout(ConstructObject) tryAsConstructObject() inout pure { return this; }
   mixin(formattedString!(generateItemCode!(", item, item", const(string)[]))
@@ -174,49 +169,6 @@ class ConstructComment : ConstructObject
   final bool typedEquals(const(ConstructComment) other) const pure
   {
     return this.value == other.value;
-  }
-}
-class ObjectBreak : ConstructObject
-{
-  this(size_t lineNumber) pure
-  {
-    super(lineNumber);
-  }
-
-  mixin finalTypeNameMembers!"constructBreak";
-  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.constructBreak);
-
-  enum processorValueType = null;
-
-  @property final override inout(ObjectBreak) tryAsObjectBreak() inout pure { return this; }
-  final override void toString(scope void delegate(const(char)[]) sink) const
-  {
-    sink(";");
-  }
-  mixin virtualEqualsMember!ObjectBreak;
-  final bool typedEquals(const(ObjectBreak) other) const pure
-  {
-    return other !is null;
-  }
-}
-class ListBreak : ConstructObject
-{
-  this(size_t lineNumber) pure
-  {
-    super(lineNumber);
-  }
-
-  mixin finalTypeNameMembers!"listBreak";
-  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.anything);
-
-  final override void toString(scope void delegate(const(char)[]) sink) const
-  {
-    sink(",");
-  }
-  mixin virtualEqualsMember!ListBreak;
-  final bool typedEquals(const(ListBreak) other) const pure
-  {
-    return other !is null;
   }
 }
 class ConstructUtf8 : ConstructString
@@ -284,6 +236,10 @@ class ConstructSymbol : ConstructObject
   {
     return value == other.value;
   }
+  final override bool isSymbolOf(const(char)[] symbol) const pure
+  {
+    return this.value == symbol;
+  }
 }
 class ConstructIntegerLiteral : ConstructInteger
 {
@@ -327,23 +283,27 @@ class ConstructIntegerLiteral : ConstructInteger
   }
   */
 }
-class ConstructBlock : ConstructObject
+enum DelimiterPair {
+  braces = 0,
+  parens = 1,
+  brackets = 2,
+}
+enum OpenMap = "{([";
+enum CloseMap = "})]";
+class ConstructDelimitedList : ConstructList
 {
-  const(ConstructObject)[] objects;
-  this(size_t lineNumber, const(ConstructObject)[] objects = null) pure
+  DelimiterPair delimiterPair;
+  protected this(size_t lineNumber, DelimiterPair delimiterPair, const(ConstructObject)[] objects) pure
   {
-    super(lineNumber);
-    this.objects = objects;
+    super(lineNumber, objects);
+    this.delimiterPair = delimiterPair;
   }
 
-  mixin finalTypeNameMembers!"constructBlock";
-  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.constructBlock);
-
-  enum processorValueType = "ConstructBlock";
-  @property final override inout(ConstructBlock) tryAsConstructBlock() inout pure { return this; }
+  enum processorValueType = "ConstructDelimitedList";
+  @property final override inout(ConstructDelimitedList) tryAsConstructDelimitedList() inout pure { return this; }
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
-    sink("{");
+    sink(OpenMap[cast(ubyte)delimiterPair..cast(ubyte)(delimiterPair+1)]);
     if(objects.length > 0) {
       objects[0].toString(sink);
       foreach(object; objects[1..$]) {
@@ -351,11 +311,14 @@ class ConstructBlock : ConstructObject
 	object.toString(sink);
       }
     }
-    sink("}");
+    sink(CloseMap[cast(ubyte)delimiterPair..cast(ubyte)(delimiterPair+1)]);
   }
-  mixin virtualEqualsMember!ConstructBlock;
-  final bool typedEquals(const(ConstructBlock) other) const pure
+  mixin virtualEqualsMember!ConstructDelimitedList;
+  final bool typedEquals(const(ConstructDelimitedList) other) const pure
   {
+    if(delimiterPair != other.delimiterPair) {
+      return false;
+    }
     if(objects.length != other.objects.length) {
       //writefln("[DEBUG] mismatched length");
       return false;
@@ -369,85 +332,69 @@ class ConstructBlock : ConstructObject
     return true;
   }
 }
-class ConstructList : ConstructObject
+class ConstructBlock : ConstructDelimitedList
 {
-  const(ConstructObject)[] items;
-  PrimitiveTypeEnum itemType;
-  this(size_t lineNumber, const(ConstructObject)[] items = null) pure
+  this(size_t lineNumber, const(ConstructObject)[] objects) pure
   {
-    super(lineNumber);
-    this.items = items;
-
-    // Get item type
-    if(items.length == 0) {
-      itemType = PrimitiveTypeEnum.anything;
-    } else {
-      itemType = items[0].primitiveTypeEnum;
-      for(size_t i = 1; i < items.length; i++) {
-	if(itemType == PrimitiveTypeEnum.anything) {
-	  break;
-	}
-	auto item = items[i];
-	itemType = commonType(itemType, item.primitiveTypeEnum);
-      }
-    }
+    super(lineNumber, DelimiterPair.braces, objects);
   }
 
-  mixin finalTypeNameMembers!"list";
-  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.list);
+  mixin finalTypeNameMembers!"constructBlock";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.constructBlock);
 
-  enum processorValueType = "ConstructList";
-
-  @property final override inout(ConstructList) tryAsConstructList() inout pure { return this; }
-  final override void toString(scope void delegate(const(char)[]) sink) const
-  {
-    sink("(");
-    if(items.length > 0) {
-      items[0].toString(sink);
-      foreach(item; items[1..$]) {
-	sink(" ");
-	item.toString(sink);
-      }
-    }
-    sink(")");
-  }
-  mixin virtualEqualsMember!ConstructList;
-  final bool typedEquals(const(ConstructList) other) const pure
-  {
-    if(items.length != other.items.length) {
-      return false;
-    }
-    foreach(i; 0..items.length) {
-      if(!items[i].equals(other.items[i])) {
-	return false;
-      }
-    }
-    return true;
-  }
+  enum processorValueType = "ConstructBlock";
+  @property final override inout(ConstructBlock) tryAsConstructBlock() inout pure { return this; }
 }
+class ConstructParenList : ConstructDelimitedList
+{
+  this(size_t lineNumber, const(ConstructObject)[] objects) pure
+  {
+    super(lineNumber, DelimiterPair.braces, objects);
+  }
+
+  mixin finalTypeNameMembers!"parenList";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.parenList);
+
+  enum processorValueType = "ConstructParenList";
+  @property final override inout(ConstructParenList) tryAsConstructParenList() inout pure { return this; }
+}
+class ConstructBracketList : ConstructDelimitedList
+{
+  this(size_t lineNumber, const(ConstructObject)[] objects) pure
+  {
+    super(lineNumber, DelimiterPair.braces, objects);
+  }
+
+  mixin finalTypeNameMembers!"constructBracketList";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.constructBracketList);
+
+  enum processorValueType = "ConstructBracketList";
+  @property final override inout(ConstructBracketList) tryAsConstructBracketList() inout pure { return this; }
+}
+
+
 
 version(unittest)
 {
   import construct.backendCore : PrimitiveType;
 
   // helper functions to create construct objects for tests
-  ObjectBreak break_(size_t lineNumber = 1)
+  ConstructSymbol break_(size_t lineNumber = 1)
   {
-    __gshared static cached = new ObjectBreak(1);
-    return (lineNumber == 1) ? cached : new ObjectBreak(lineNumber);
-  }
-  ListBreak listBreak(size_t lineNumber = 1)
-  {
-    __gshared static cached = new ListBreak(1);
-    return (lineNumber == 1) ? cached : new ListBreak(lineNumber);
+    __gshared static cached = new ConstructSymbol(1, ";");
+    return (lineNumber == 1) ? cached : new ConstructSymbol(lineNumber, ";");
   }
   ConstructBlock block(size_t lineNumber, ConstructObject[] objects ...)
   {
     return new ConstructBlock(lineNumber, objects);
   }
-  ConstructList list(size_t lineNumber, ConstructObject[] objects ...)
+  ConstructParenList parenList(size_t lineNumber, ConstructObject[] objects ...)
   {
-    return new ConstructList(lineNumber, objects);
+    return new ConstructParenList(lineNumber, objects);
+  }
+  ConstructBracketList bracketList(size_t lineNumber, ConstructObject[] objects ...)
+  {
+    return new ConstructBracketList(lineNumber, objects);
   }
   ConstructSymbol symbol(size_t lineNumber, string value)
   {

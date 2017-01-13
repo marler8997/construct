@@ -7,7 +7,7 @@ import construct.util;
 import construct.logging;
 import construct.parserCore;
 import construct.standardParser : isValidSymbol;
-import construct.backendCore : ConstructType, ConstructPattern, ConstructClass,
+import construct.backendCore : ConstructType, ConstructPattern, ConstructClass, ConstructParenList,
                                ConstructString, ConstructPointer, ConstructBool, ConstructNumber,
                                canBe, tryAs, IConstructContext, NoConstructContext,
                                PrimitiveType, KeywordType;
@@ -40,20 +40,25 @@ bool isOptional(const CountType type) pure nothrow @nogc @safe
     type == CountType.many;
 }
 
-enum Raw { off, on }
+enum PatternNodeFlags {
+  none = 0x00,
+  raw = 0x01,
+  untilNextNode = 0x02,
+}
 struct PatternNode
 {
   static auto null_()
   {
-    return immutable PatternNode(null, CountType.one, Raw.off, null);
+    return immutable PatternNode(null, CountType.one, PatternNodeFlags.none, null);
   }
 
   string name;
   CountType countType;
-  Raw raw;
+  PatternNodeFlags flags;
   immutable(ConstructType) type;
+  
 
-  this(string name, CountType countType, Raw raw, immutable(ConstructType) type) immutable pure
+  this(string name, CountType countType, PatternNodeFlags flags, immutable(ConstructType) type) immutable pure
   {
     assert(name.length > 0);
     if(type.tryAsConstructSymbol) {
@@ -63,10 +68,10 @@ struct PatternNode
     }
     this.name = name;
     this.countType = countType;
-    this.raw = raw;
+    this.flags = flags;
     this.type = type;
   }
-  this(string name, CountType countType, Raw raw, immutable(ConstructType) type) pure
+  this(string name, CountType countType, PatternNodeFlags flags, immutable(ConstructType) type) pure
   {
     assert(name.length > 0);
     if(type.tryAsConstructSymbol) {
@@ -76,9 +81,11 @@ struct PatternNode
     }
     this.name = name;
     this.countType = countType;
-    this.raw = raw;
+    this.flags = flags;
     this.type = type;
   }
+  @property bool matchesRaw() const { return (flags & PatternNodeFlags.raw) != 0; }
+  @property bool matchesUntilNextNode() const { return (flags & PatternNodeFlags.untilNextNode) != 0; }
   void toString(Sink)(Sink sink) const
   {
     string rawString = raw ? "raw " : "";
@@ -297,17 +304,24 @@ struct Pattern
 
 Pattern compileBasicPattern(string code)
 {
-  import construct.parser : standardParser;
-  const(ConstructObject)[] parsedObjects = standardParser!(Appender!(const(ConstructObject)[])).func(code);
-  assert(parsedObjects.length == 1);
-  auto list = parsedObjects[0].tryAsConstructList;
-  assert(list);
-  return processBasicPattern(list);
+  import construct.standardParser : parse;
+  auto parsedObjects = parse(code);
+  if(parsedObjects.length == 0) {
+    throw new Exception(format("Pattern '%s' did not contain any construct objects", code));
+  }
+  if(parsedObjects.length > 1) {
+    throw new Exception(format("Pattern '%s' must be a single parenthesis group of objects, but there are %s", code, parsedObjects.length));
+  }
+  auto parenList = parsedObjects[0].tryAsConstructParenList;
+  if(!parenList) {
+    throw new Exception(format("Pattern '%s' is not surrounded by parenthesis", code));
+  }
+  return processBasicPattern(parenList.objects);
 }
-Pattern processBasicPattern(const(ConstructList) patternList)
+Pattern processBasicPattern(const(ConstructObject)[] patternObjects)
 {
   ConstructProcessor processor = ConstructProcessor(null);
-  return processPattern(&processor, NoConstructContext.instance, patternList);
+  return processPattern(&processor, NoConstructContext.instance, patternObjects, 1);
 }
 
 inout(ConstructType) getPatternType(ConstructProcessor* processor, inout(ConstructObject) typeObject)
@@ -330,8 +344,7 @@ inout(ConstructType) getPatternType(ConstructProcessor* processor, inout(Constru
 				 An(typeObject.typeName)));
 }
 
-Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) constructContext,
-		       const(ConstructList) patternList)
+Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) constructContext, const(ConstructObject)[] patternObjects, size_t lineNumber)
 {
   auto nodes = new PatternNode[0];
   void appendNode(PatternNode node)
@@ -343,59 +356,57 @@ Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) c
   ConstructType opType = null;
 
   for(size_t itemIndex = 0;;) {
-    if(itemIndex >= patternList.items.length) {
+    if(itemIndex >= patternObjects.length) {
       break;
     }
 
     string nodeNameString;
     {
-      auto nodeName = processor.tryConsumeSymbol(constructContext, patternList.items, &itemIndex);
+      auto nodeName = processor.tryConsumeSymbol(constructContext, patternObjects, &itemIndex);
       if(!nodeName) {
-        throw processor.semanticError(patternList.lineNumber, format
+        throw processor.semanticError(lineNumber, format
                                       ("expected pattern name to be a symbol but got %s",
-                                       An(patternList.items[itemIndex].typeName)));
+                                       An(patternObjects[itemIndex].typeName)));
       }
       nodeNameString = nodeName.value;
     }
 
     if(nodeNameString == "this") {
       if(nodes.length > 0) {
-        throw processor.semanticError(patternList.lineNumber, "only the first pattern node can be named 'this'");
+        throw processor.semanticError(lineNumber, "only the first pattern node can be named 'this'");
       }
-      if(itemIndex >= patternList.items.length) {
+      if(itemIndex >= patternObjects.length) {
         opType = PrimitiveType.anything.unconst;
         break;
       }
 
       // Check for raw
-      if(auto symbol = patternList.items[itemIndex].tryAsConstructSymbol) {
-        if(symbol.value == "raw") {
-	  throw processor.semanticError(symbol.lineNumber, "the 'raw' modifier is not valid on the 'this' pattern node");
-        }
+      if(patternObjects[itemIndex].isSymbolOf("raw")) {
+	throw processor.semanticError(patternObjects[itemIndex].lineNumber, "the 'raw' modifier is not valid on the 'this' pattern node");
       }
       
       {
-        auto result = processor.consumeValueAlreadyCheckedIndex(constructContext, patternList.items, &itemIndex);
+        auto result = processor.consumeValueAlreadyCheckedIndex(constructContext, patternObjects, &itemIndex);
         if(result.hasAction) {
-          throw processor.semanticError(patternList.items[itemIndex].lineNumber,
+          throw processor.semanticError(patternObjects[itemIndex].lineNumber,
                                         format("expected the expression to return a type but returned an action '%s'", result.action));
         }
         if(result.object is null) {
-          throw processor.semanticError(patternList.items[itemIndex].lineNumber,
+          throw processor.semanticError(patternObjects[itemIndex].lineNumber,
                                         "expected the expression to return a type but returned null");
         }
-        if(result.object.isListBreak) {
+        if(result.object.isSymbolOf(",")) {
           opType = PrimitiveType.anything.unconst;
           continue;
         }
         opType = getPatternType(processor, result.object).unconst;
-        if(itemIndex >= patternList.items.length) {
+        if(itemIndex >= patternObjects.length) {
           break;
         }
       }
       {
-        auto object = patternList.items[itemIndex].unconst;
-        if(!object.isListBreak) {
+        auto object = patternObjects[itemIndex].unconst;
+        if(!object.isSymbolOf(",")) {
           throw processor.semanticError(object.lineNumber, format
                                         ("expected a list break ',' after this node, but got %s", An(object.typeName)));
         }
@@ -404,8 +415,8 @@ Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) c
       continue;
     }
 
-    if(itemIndex >= patternList.items.length) {
-      appendNode(PatternNode(nodeNameString, CountType.one, Raw.off, PrimitiveType.anything));
+    if(itemIndex >= patternObjects.length) {
+      appendNode(PatternNode(nodeNameString, CountType.one, PatternNodeFlags.none, PrimitiveType.anything));
       break;
     }
 
@@ -413,42 +424,49 @@ Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) c
     CountType countType;
     {
       size_t newIndex = itemIndex;
-      countType = getCountType(patternList.items, &newIndex);
+      countType = getCountType(patternObjects, &newIndex);
       if(newIndex > itemIndex) {
         itemIndex = newIndex;
-        if(itemIndex >= patternList.items.length) {
-          appendNode(PatternNode(nodeNameString, countType, Raw.off, PrimitiveType.anything));
+        if(itemIndex >= patternObjects.length) {
+          appendNode(PatternNode(nodeNameString, countType, PatternNodeFlags.none, PrimitiveType.anything));
           break;
         }
       }
     }
 
     // Check for raw
-    Raw raw = Raw.off;
-    if(auto symbol = patternList.items[itemIndex].tryAsConstructSymbol) {
-      if(symbol.value == "raw") {
-	raw = Raw.on;
-        itemIndex++;
-        if(itemIndex >= patternList.items.length) {
-          appendNode(PatternNode(nodeNameString, CountType.one, raw, PrimitiveType.anything));
-          break;
-        }
+    PatternNodeFlags flags = PatternNodeFlags.none;
+    if(patternObjects[itemIndex].isSymbolOf("raw")) {
+      flags |= PatternNodeFlags.raw;
+      itemIndex++;
+      if(itemIndex >= patternObjects.length) {
+	appendNode(PatternNode(nodeNameString, CountType.one, flags, PrimitiveType.anything));
+	break;
       }
     }
-
+    // Check for untilNextNode
+    if(patternObjects[itemIndex].isSymbolOf("untilNextNode")) {
+      flags |= PatternNodeFlags.untilNextNode;
+      itemIndex++;
+      if(itemIndex >= patternObjects.length) {
+	appendNode(PatternNode(nodeNameString, CountType.one, flags, PrimitiveType.anything));
+	break;
+      }
+    }
+    
     ConstructType type;
     {
-      auto result = processor.consumeValueAlreadyCheckedIndex(constructContext, patternList.items, &itemIndex);
+      auto result = processor.consumeValueAlreadyCheckedIndex(constructContext, patternObjects, &itemIndex);
       if(result.hasAction) {
-        throw processor.semanticError(patternList.items[itemIndex].lineNumber,
+        throw processor.semanticError(patternObjects[itemIndex].lineNumber,
                                       format("expected the expression to return a type but returned an action '%s'", result.action));
       }
       if(result.object is null) {
-	throw processor.semanticError(patternList.items[itemIndex].lineNumber,
+	throw processor.semanticError(patternObjects[itemIndex].lineNumber,
 				      "expected the expression to return a type but returned null");
       }
-      if(result.object.isListBreak) {
-        appendNode(PatternNode(nodeNameString, countType, raw, PrimitiveType.anything));
+      if(result.object.isSymbolOf(",")) {
+        appendNode(PatternNode(nodeNameString, countType, flags, PrimitiveType.anything));
 	continue;
       }
 
@@ -473,23 +491,23 @@ Pattern processPattern(ConstructProcessor* processor, const(IConstructContext) c
       */
     }
 
-    if(itemIndex >= patternList.items.length) {
-      appendNode(PatternNode(nodeNameString, countType, raw, type.immutable_));
+    if(itemIndex >= patternObjects.length) {
+      appendNode(PatternNode(nodeNameString, countType, flags, type.immutable_));
       break;
     }
-    if(patternList.items[itemIndex].isListBreak) {
-      appendNode(PatternNode(nodeNameString, countType, raw, type.immutable_));
+    if(patternObjects[itemIndex].isSymbolOf(",")) {
+      appendNode(PatternNode(nodeNameString, countType, flags, type.immutable_));
       itemIndex++;
       continue;
     }
 
-    appendNode(PatternNode(nodeNameString, countType, raw, type.immutable_));
-    if(itemIndex >= patternList.items.length) {
+    appendNode(PatternNode(nodeNameString, countType, flags, type.immutable_));
+    if(itemIndex >= patternObjects.length) {
       break;
     }
     {
-      auto object = patternList.items[itemIndex];
-      if(!object.isListBreak) {
+      auto object = patternObjects[itemIndex];
+      if(!object.isSymbolOf(",")) {
 	throw processor.semanticError(object.lineNumber, format
 				      ("expected a list break ',' got %s", An(object.typeName)));
       }
@@ -550,36 +568,36 @@ unittest
   }
   auto variants =
     [
-     StringPatternPair("aName"                   , immutable PatternNode("aName", CountType.one, Raw.off, PrimitiveType.anything)),
-     StringPatternPair("aName one"               , immutable PatternNode("aName", CountType.one, Raw.off, PrimitiveType.anything)),
-     StringPatternPair("aName anything"          , immutable PatternNode("aName", CountType.one, Raw.off, PrimitiveType.anything)),
-     StringPatternPair("aName one anything"      , immutable PatternNode("aName", CountType.one, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("aName"                   , immutable PatternNode("aName", CountType.one, PatternNodeFlags.none, PrimitiveType.anything)),
+     StringPatternPair("aName one"               , immutable PatternNode("aName", CountType.one, PatternNodeFlags.none, PrimitiveType.anything)),
+     StringPatternPair("aName anything"          , immutable PatternNode("aName", CountType.one, PatternNodeFlags.none, PrimitiveType.anything)),
+     StringPatternPair("aName one anything"      , immutable PatternNode("aName", CountType.one, PatternNodeFlags.none, PrimitiveType.anything)),
 
-     StringPatternPair("_"                       , immutable PatternNode("_", CountType.one, Raw.off, PrimitiveType.anything)),
-     StringPatternPair("_ one"                   , immutable PatternNode("_", CountType.one, Raw.off, PrimitiveType.anything)),
-     StringPatternPair("_ anything"              , immutable PatternNode("_", CountType.one, Raw.off, PrimitiveType.anything)),
-     StringPatternPair("_ one anything"          , immutable PatternNode("_", CountType.one, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("_"                       , immutable PatternNode("_", CountType.one, PatternNodeFlags.none, PrimitiveType.anything)),
+     StringPatternPair("_ one"                   , immutable PatternNode("_", CountType.one, PatternNodeFlags.none, PrimitiveType.anything)),
+     StringPatternPair("_ anything"              , immutable PatternNode("_", CountType.one, PatternNodeFlags.none, PrimitiveType.anything)),
+     StringPatternPair("_ one anything"          , immutable PatternNode("_", CountType.one, PatternNodeFlags.none, PrimitiveType.anything)),
 
-     StringPatternPair("aName optional"          , immutable PatternNode("aName", CountType.optional, Raw.off, PrimitiveType.anything)),
-     StringPatternPair("aName optional anything" , immutable PatternNode("aName", CountType.optional, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("aName optional"          , immutable PatternNode("aName", CountType.optional, PatternNodeFlags.none, PrimitiveType.anything)),
+     StringPatternPair("aName optional anything" , immutable PatternNode("aName", CountType.optional, PatternNodeFlags.none, PrimitiveType.anything)),
 
-     StringPatternPair("aName many"              , immutable PatternNode("aName", CountType.many, Raw.off, PrimitiveType.anything)),
-     StringPatternPair("aName many anything"     , immutable PatternNode("aName", CountType.many, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("aName many"              , immutable PatternNode("aName", CountType.many, PatternNodeFlags.none, PrimitiveType.anything)),
+     StringPatternPair("aName many anything"     , immutable PatternNode("aName", CountType.many, PatternNodeFlags.none, PrimitiveType.anything)),
 
-     StringPatternPair("aName oneOrMore"         , immutable PatternNode("aName", CountType.oneOrMore, Raw.off, PrimitiveType.anything)),
-     StringPatternPair("aName oneOrMore anything", immutable PatternNode("aName", CountType.oneOrMore, Raw.off, PrimitiveType.anything)),
+     StringPatternPair("aName oneOrMore"         , immutable PatternNode("aName", CountType.oneOrMore, PatternNodeFlags.none, PrimitiveType.anything)),
+     StringPatternPair("aName oneOrMore anything", immutable PatternNode("aName", CountType.oneOrMore, PatternNodeFlags.none, PrimitiveType.anything)),
 
-     StringPatternPair("aName string"            , immutable PatternNode("aName", CountType.one, Raw.off, PrimitiveType.string_)),
-     StringPatternPair("aName one string"        , immutable PatternNode("aName", CountType.one, Raw.off, PrimitiveType.string_)),
+     StringPatternPair("aName string"            , immutable PatternNode("aName", CountType.one, PatternNodeFlags.none, PrimitiveType.string_)),
+     StringPatternPair("aName one string"        , immutable PatternNode("aName", CountType.one, PatternNodeFlags.none, PrimitiveType.string_)),
 
-     StringPatternPair("_ string"                , immutable PatternNode("_", CountType.one, Raw.off, PrimitiveType.string_)),
-     StringPatternPair("_ one string"            , immutable PatternNode("_", CountType.one, Raw.off, PrimitiveType.string_)),
+     StringPatternPair("_ string"                , immutable PatternNode("_", CountType.one, PatternNodeFlags.none, PrimitiveType.string_)),
+     StringPatternPair("_ one string"            , immutable PatternNode("_", CountType.one, PatternNodeFlags.none, PrimitiveType.string_)),
 
-     StringPatternPair("aName optional string"   , immutable PatternNode("aName", CountType.optional, Raw.off, PrimitiveType.string_)),
+     StringPatternPair("aName optional string"   , immutable PatternNode("aName", CountType.optional, PatternNodeFlags.none, PrimitiveType.string_)),
 
-     StringPatternPair("aName many string"       , immutable PatternNode("aName", CountType.many, Raw.off, PrimitiveType.string_)),
+     StringPatternPair("aName many string"       , immutable PatternNode("aName", CountType.many, PatternNodeFlags.none, PrimitiveType.string_)),
 
-     StringPatternPair("aName oneOrMore string"  , immutable PatternNode("aName", CountType.oneOrMore, Raw.off, PrimitiveType.string_)),
+     StringPatternPair("aName oneOrMore string"  , immutable PatternNode("aName", CountType.oneOrMore, PatternNodeFlags.none, PrimitiveType.string_)),
      ];
 
   foreach(variant; variants) {

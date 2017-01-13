@@ -1,9 +1,8 @@
 /*
 Grammar
 ===========================================
-construct ::= ( nameSymbol | operatorSymbol | number | string | block | list | ';' )*
-block ::= '{' construct '}'
-list ::= '(' (construct | ',')* ')'
+construct ::= ( nameSymbol | operatorSymbol | number | string | codeInsidePairedOperators )*
+codeInsidePairedSymbols ::= '{' construct '}' | '(' construct ')' | '[' construct '];
 string ::= '"' chars '"'
 symbolString ::= "'" nameSymbol
 */
@@ -41,7 +40,7 @@ struct AsciiPrint
 	formattedWrite(sink, "\\u%04x", c);
       }
     } else if (c >= 32) {
-      sink((cast(char*)&c)[0..1]);
+      sink((&(cast(char)c))[0..1]);
     } else {
       if(c == '\n') {
 	sink(`\n`);
@@ -96,14 +95,42 @@ class ConstructCFamilyParseException : ConstructParseException
 // All valid operator characters that appear in sequence are considered
 // one operator
 //
-
-enum CharFlags {
-  // Flags
-  validOperatorChar = 0x01,
-
-  // Canned Values
+enum CharOperatorKind : ubyte {
   none = 0,
+  detached = 1,  // i.e. ",", "#"
+  attachable = 2,// i.e. "<", "=", "!"
+  leftPair = 3,  // i.e. "(", "{", "["
+  rightPair = 4, // i.e. ")", "}", "]"
 }
+enum CharFlags : ubyte {
+  none = 0x00,
+  
+  // Operator flags
+  operatorKindMask = 0x07, // 0000 0111
+  detachedOperator      = CharOperatorKind.detached, 
+  attachableOperator    = CharOperatorKind.attachable,
+  leftPairOperator      = CharOperatorKind.leftPair,
+  rightPairOperator     = CharOperatorKind.rightPair
+}
+CharOperatorKind getOperatorKind(CharFlags flags) pure
+{
+  auto value = cast(CharOperatorKind)(flags & CharFlags.operatorKindMask);
+  assert(value <= CharOperatorKind.max, "CodeBug: invalid character flags, operator flags are too big");
+  return value;
+}
+char getRightOperator(char c) pure
+{
+  assert(c == '(' || c == '[' || c == '{', "code bug: getRightOperator got an invalid character");
+  return (c == '(') ? ')' : cast(char)(c + 2);
+}
+DelimiterPair getDelimiterPair(char c) pure
+{
+  if(c == '{') return DelimiterPair.braces;
+  if(c == '(') return DelimiterPair.parens;
+  if(c == '[') return DelimiterPair.brackets;
+  assert(0, format("CodeBug: character '%s' is not the start of a known delimiter pair", c));
+}
+
 CharFlags lookupCharFlags(dchar c) pure
 {
   return (c < charFlagsTable.length) ? charFlagsTable[c] : CharFlags.none;
@@ -143,21 +170,21 @@ immutable CharFlags[] charFlagsTable =
    CharFlags.none, // 30 ''
    CharFlags.none, // 31 ''
    CharFlags.none, // 32 ' ' (space)
-   CharFlags.validOperatorChar, // 33 '!'
+   CharFlags.attachableOperator, // 33 '!'
    CharFlags.none, // 34 '"'
-   CharFlags.validOperatorChar, // 35 '#'
-   CharFlags.validOperatorChar, // 36 '$'
-   CharFlags.validOperatorChar, // 37 '%'
-   CharFlags.validOperatorChar, // 38 '&'
+   CharFlags.detachedOperator, // 35 '#'
+   CharFlags.detachedOperator, // 36 '$'
+   CharFlags.detachedOperator, // 37 '%'
+   CharFlags.attachableOperator, // 38 '&'
    CharFlags.none, // 39 '\''
-   CharFlags.none, // 40 '('
-   CharFlags.none, // 41 ')'
-   CharFlags.validOperatorChar, // 42 '*'
-   CharFlags.validOperatorChar, // 43 '+'
-   CharFlags.none, // 44 ','
-   CharFlags.validOperatorChar, // 45 '-'
-   CharFlags.validOperatorChar, // 46 '.'
-   CharFlags.validOperatorChar, // 47 '/'
+   CharFlags.leftPairOperator, // 40 '('
+   CharFlags.rightPairOperator, // 41 ')'
+   CharFlags.detachedOperator, // 42 '*'
+   CharFlags.attachableOperator, // 43 '+'
+   CharFlags.detachedOperator, // 44 ','
+   CharFlags.attachableOperator, // 45 '-'
+   CharFlags.detachedOperator, // 46 '.'
+   CharFlags.detachedOperator, // 47 '/'
    CharFlags.none, // 48 '0'
    CharFlags.none, // 49 '1'
    CharFlags.none, // 50 '2'
@@ -168,13 +195,13 @@ immutable CharFlags[] charFlagsTable =
    CharFlags.none, // 55 '7'
    CharFlags.none, // 56 '8'
    CharFlags.none, // 57 '9'
-   CharFlags.validOperatorChar, // 58 ':'
-   CharFlags.none, // 59 ';'
-   CharFlags.validOperatorChar, // 60 '<'
-   CharFlags.validOperatorChar, // 61 '='
-   CharFlags.validOperatorChar, // 62 '>'
-   CharFlags.validOperatorChar, // 63 '?'
-   CharFlags.validOperatorChar, // 64 '@'
+   CharFlags.detachedOperator, // 58 ':'
+   CharFlags.detachedOperator, // 59 ';'
+   CharFlags.attachableOperator, // 60 '<'
+   CharFlags.attachableOperator, // 61 '='
+   CharFlags.attachableOperator, // 62 '>'
+   CharFlags.detachedOperator, // 63 '?'
+   CharFlags.detachedOperator, // 64 '@'
    CharFlags.none, // 65 'A'
    CharFlags.none, // 66 'B'
    CharFlags.none, // 67 'C'
@@ -201,10 +228,10 @@ immutable CharFlags[] charFlagsTable =
    CharFlags.none, // 88 'X'
    CharFlags.none, // 89 'Y'
    CharFlags.none, // 90 'Z'
-   CharFlags.none, // 91 '['
+   CharFlags.leftPairOperator, // 91 '['
    CharFlags.none, // 92 '\\'
-   CharFlags.none, // 93 ']'
-   CharFlags.validOperatorChar, // 94 '^'
+   CharFlags.rightPairOperator, // 93 ']'
+   CharFlags.detachedOperator, // 94 '^'
    CharFlags.none, // 95 '_'
    CharFlags.none, // 96 '`'
    CharFlags.none, // 97 'a'
@@ -233,11 +260,11 @@ immutable CharFlags[] charFlagsTable =
    CharFlags.none, // 120 'x'
    CharFlags.none, // 121 'y'
    CharFlags.none, // 122 'z'
-   CharFlags.none, // 123 '{'
-   CharFlags.validOperatorChar, // 124 '|'
-   CharFlags.none, // 125 '}'
-   CharFlags.validOperatorChar, // 126 '~'
-   CharFlags.validOperatorChar, // 127 '' (DEL)
+   CharFlags.leftPairOperator, // 123 '{'
+   CharFlags.attachableOperator, // 124 '|'
+   CharFlags.rightPairOperator, // 125 '}'
+   CharFlags.detachedOperator, // 126 '~'
+   CharFlags.none, // 127 '' (DEL)
    ];
 
 // TODO: add support for non-ascii symbols?
@@ -253,14 +280,23 @@ bool isValidSymbol(const(char)[] str) pure
   // Check if it is an operator symbol
   //
   auto firstCharFlags = lookupCharFlags(firstChar);
-  if(firstCharFlags & CharFlags.validOperatorChar) {
+  auto firstCharOperatorKind = firstCharFlags.getOperatorKind();
+  final switch(firstCharOperatorKind) {
+  case CharOperatorKind.none:
+    break;
+  case CharOperatorKind.detached:
+    return str.length == 1;
+  case CharOperatorKind.attachable:
     foreach(c; str[1..$]) {
-      auto charFlags = lookupCharFlags(c);
-      if(!(charFlags & CharFlags.validOperatorChar)) {
-        return false; // starts with operator chars, but then has non-operator chars
+      if(lookupCharFlags(c).getOperatorKind() != CharOperatorKind.attachable) {
+        return false; // starts with attachable operator chars, but then has a character that isn't one
       }
     }
-    return true; // it is an operator symbol
+    return true;
+  case CharOperatorKind.leftPair:
+    return str.length == 1;
+  case CharOperatorKind.rightPair:
+    return str.length == 1;
   }
 
   //
@@ -312,15 +348,76 @@ private bool isSymbolCharacter(dchar c) pure
   return (c <= '9');
 }
 
-const(ConstructObject)[] parse(T)(string code) pure if(isConstructBuilder!(T))
+interface ConstructBuilder
 {
-  auto consumer = ConstructConsumer!T(code.ptr, code.ptr + code.length);
-  return consumer.parse();
+  void put(const(ConstructObject)) pure;
+  @property size_t currentIndex() pure;
+  const(ConstructObject)[] trimFrom(size_t index) pure;
 }
 
-
-struct ConstructConsumer(T) if(isConstructBuilder!(T))
+struct CustomAppender(T)
 {
+  private T[] buffer;
+  private size_t count;
+  void put(T object)
+  {
+    if(count >= buffer.length) {
+      buffer.length *= 2;
+    }
+    buffer[count++] = object;
+  }
+  @property inout(T)[] data() inout
+  {
+    return buffer[0..count];
+  }
+  void shrinkTo(size_t newSize)
+  {
+    count = newSize;
+  }
+}
+
+class AppenderConstructBuilder : ConstructBuilder
+{
+  // I get an assert in the compiler when I uncomment this
+  //Appender!(const(ConstructObject)[]) appender;
+  CustomAppender!(ConstructObject) appender;
+  this(size_t initialSize) pure
+  {
+    appender.buffer = new ConstructObject[initialSize];
+  }
+  final void put(const(ConstructObject) object) pure
+  {
+    appender.put(object.unconst);
+  }
+  @property final size_t currentIndex() pure
+  {
+    return appender.data.length;
+  }
+  final const(ConstructObject)[] trimFrom(size_t index) pure
+  {
+    assert(index <= appender.data.length, "CodeBug: AppenderConstructBuilder.trimFrom");
+
+    auto trimmedObjects = appender.data[index..$].dup;
+    appender.shrinkTo(index);
+    return trimmedObjects;
+  }
+}
+
+const(ConstructObject)[] parse(string code) pure
+{
+  auto initialSize = code.length / 8; // assume an object about every 8 characters in the source
+  if(initialSize < 32) {
+    initialSize = 32; // minimum of 32
+  }
+  auto builder = new AppenderConstructBuilder(initialSize); 
+  auto consumer = ConstructConsumer(builder, code.ptr, code.ptr+code.length);
+  consumer.parse();
+  return builder.appender.data;
+}
+
+struct ConstructConsumer
+{
+  ConstructBuilder builder;
   immutable(char)* limit;
   const bool keepComments;
 
@@ -334,8 +431,9 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   }
   State state;
 
-  this(immutable(char)* start, immutable char* limit, bool keepComments = false) pure
+  this(ConstructBuilder builder, immutable(char)* start, immutable char* limit, bool keepComments = false) pure
   {
+    this.builder = builder;
     this.limit = limit;
     this.keepComments = keepComments;
 
@@ -378,18 +476,6 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
   }
 
   // InputState:
-  //   next points to first character
-  final const(ConstructObject)[] parse() pure
-  {
-    if(keepComments) {
-      throw imp("keep comments");
-    }
-    T objects = T.init;
-    parse(0, objects);
-    return objects.done;
-  }
-
-  // InputState:
   //   next points to the character to read (note: could be at the limit)
   // OutputState:
   //   cpos points to chracter that next was pointing to
@@ -408,16 +494,26 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
 
   // InputState:
   //   next points to first character
-  //   context = '\0' (root), '}' (block), ')' (list)
+  final void parse() pure
+  {
+    if(keepComments) {
+      throw imp("keep comments");
+    }
+    parse(0);
+  }
+
+  // InputState:
+  //   next points to first character
+  //   context = '\0' (root), '}' (block)
   // OutputState:
   //   cpos points to next character
   //   if(cpos < limit) {
   //     c contains char pointed to by c
   //     next points to next char
   //   }
-  private final void parse(char context, ref T objects) pure
+  private final void parse(char context) pure
   {
-
+  NEXT_CHARACTER:
     while(true) {
       skipWhitespace();
       if(state.cpos >= limit) {
@@ -425,83 +521,72 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
       }
 
       auto c = state.c;
-      if(c == ';') {
-        objects.put(new ObjectBreak(state.lineNumber));
-        continue;
-      }
-
-      if(c == '{') {
-	auto blockLineNumber = state.lineNumber;
-	auto blockObjects = T.init;
-	parse('}', blockObjects);
-	objects.put(new ConstructBlock(blockLineNumber, blockObjects.done));
-	continue;
-      }
-
-      if(c == '(') {
-	auto listLineNumber = state.lineNumber;
-	auto listObjects = T.init;
-	parse(')', listObjects);
-	objects.put(new ConstructList(listLineNumber, listObjects.done));
-	continue;
-      }
-
-      if(c == ',') {
-	if(context != ')') {
-	  throw new ConstructCFamilyParseException
-	    (ErrorType.invalidChar, state.lineNumber, "list breaks or commas ',', can only appear inside lists");
-	}
-	objects.put(new ListBreak(state.lineNumber));
-	continue;
-      }
-
-      if(c == ')') {
-	if(context == ')') {
-	  return;
-	}
-	throw new ConstructCFamilyParseException
-	  (ErrorType.invalidChar, state.lineNumber, "extra mismatched close parens ')'");
-      }
-
-      if(c == '}') {
-	if(context == 0) {
-	  throw new ConstructCFamilyParseException
-	    (ErrorType.invalidChar, state.lineNumber, "extra mismatched close brace '}'");
-	} else if(context == ')') {
-	  throw new ConstructCFamilyParseException
-	    (ErrorType.invalidChar, state.lineNumber, "expected close parens ')' to end list, but got close brace '}'");
-	}
-	return;
-      }
 
       // Handle Comments
       if(c == '/') {
 	auto commentLineNumber = state.lineNumber;
 	auto comment = parseComment();
 	if(keepComments) {
-	  objects.put(new ConstructComment(commentLineNumber, comment));
+	  builder.put(new ConstructComment(commentLineNumber, comment));
 	}
 	continue;
-      }
-
-      // Handle Operator Symbols
-      {
-        auto charFlags = lookupCharFlags(c);
-        if(charFlags & CharFlags.validOperatorChar) {
-          auto opLineNumber = state.lineNumber;
-          auto operator = parseOperator();
-          objects.put(new ConstructSymbol(opLineNumber, operator));
-          state.next = state.cpos; // rewind
-          continue;
-        }
       }
 
       // Quoted Strings
       if(c == '"') {
         auto stringLineNumber = state.lineNumber;
 	auto string_ = parseQuoted();
-	objects.put(new ConstructUtf8(stringLineNumber, string_));
+	builder.put(new ConstructUtf8(stringLineNumber, string_));
 	continue;
+      }
+
+      // Operator Characters
+      auto charFlags = lookupCharFlags(c);
+      auto operatorKind = charFlags.getOperatorKind();
+      final switch(operatorKind) {
+      case CharOperatorKind.none:
+	break;
+      case CharOperatorKind.detached: {
+	  auto opLineNumber = state.lineNumber;
+	  builder.put(new ConstructSymbol(opLineNumber, state.cpos[0..state.next-state.cpos]));
+	}
+	goto NEXT_CHARACTER;
+      case CharOperatorKind.attachable: {
+	  auto opLineNumber = state.lineNumber;
+	  auto operator = parseOperator();
+	  builder.put(new ConstructSymbol(opLineNumber, operator));
+	  state.next = state.cpos; // rewind
+	}
+	goto NEXT_CHARACTER;
+      case CharOperatorKind.leftPair: {
+	  size_t saveIndex = builder.currentIndex();
+	  parse((cast(char)c).getRightOperator());
+          auto objects = builder.trimFrom(saveIndex);
+          {
+            ConstructDelimitedList list;
+            if(c == '{') {
+              list = new ConstructBlock(state.lineNumber, objects);
+            } else if(c == '(') {
+              list = new ConstructParenList(state.lineNumber, objects);
+            } else if(c == '[') {
+              list = new ConstructBracketList(state.lineNumber, objects);
+            } else {
+              assert(0, "codebug: unhandled leftPair operator");
+            }
+            builder.put(list);
+          }
+	}
+	goto NEXT_CHARACTER;
+      case CharOperatorKind.rightPair:
+	if(context != c) {
+	  if(context == 0) {
+	    throw new ConstructCFamilyParseException
+	      (ErrorType.invalidChar, state.lineNumber, format("extra close operator '%s'", c));
+	  }
+	  throw new ConstructCFamilyParseException
+	    (ErrorType.invalidChar, state.lineNumber, format("expected close operator '%s', but got '%s'", context, c));
+	}
+	return;
       }
 
       // Symbol Strings
@@ -517,7 +602,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
 	    (ErrorType.invalidChar, state.lineNumber, format("expected symbol character after ' but got '%s'", AsciiPrint(state.c)));
 	}
 	auto symbol = parseSymbol();
-	objects.put(new ConstructUtf8(stringLineNumber, symbol));
+	builder.put(new ConstructUtf8(stringLineNumber, symbol));
 	state.next = state.cpos; // rewind
 	continue;
       }
@@ -526,7 +611,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
       if(c >= '0' && c <= '9') {
         auto numberLineNumber = state.lineNumber;
         auto numberString = parseNumber();
-        objects.put(new ConstructIntegerLiteral(numberLineNumber, to!BigInt(numberString)));
+        builder.put(new ConstructIntegerLiteral(numberLineNumber, to!BigInt(numberString)));
         state.next = state.cpos; // rewind
         continue;
       }
@@ -535,10 +620,10 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
         auto symbolLineNumber = state.lineNumber;
 	auto symbol = parseSymbol();
 	if(state.cpos >= limit) {
-	  objects.put(new ConstructSymbol(symbolLineNumber, symbol));
+	  builder.put(new ConstructSymbol(symbolLineNumber, symbol));
 	  break;
 	}
-	objects.put(new ConstructSymbol(symbolLineNumber, symbol));
+	builder.put(new ConstructSymbol(symbolLineNumber, symbol));
 	state.next = state.cpos; // rewind
 	continue;
       }
@@ -556,7 +641,7 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
        format("expected '%s' but reached end of input", context));
   }
 
-  static string createUnescapedString(size_t lineNumber, string str, size_t escapeRemoveCount)
+  static string createUnescapedString(size_t lineNumber, string str, size_t escapeRemoveCount) pure
   {
     // Doesn't need to decode to UTF-8 because all escape sequences will be in 1-byte characters only
     char[] newString = new char[str.length - escapeRemoveCount];
@@ -704,8 +789,8 @@ struct ConstructConsumer(T) if(isConstructBuilder!(T))
     while(next < limit) {
       auto cpos = next;
       auto c = decodeUtf8(&next, limit);
-      auto flags = lookupCharFlags(c);
-      if(!(flags & CharFlags.validOperatorChar)) {
+      auto operatorKind = lookupCharFlags(c).getOperatorKind();
+      if(operatorKind != CharOperatorKind.attachable) {
 	auto operator = state.cpos[0..cpos-state.cpos];
 	state.cpos = cpos;
 	state.c = c;
@@ -816,21 +901,19 @@ unittest
       debug writefln("[TEST] \"%s\"", AsciiPrintString(code));
       stdout.flush();
     }
-    auto codeTree = parse!(Appender!(const(ConstructObject)[]))(code);
-    if(expected) {
-      if(codeTree.length != expected.length) {
-	debug writefln("Expected: %s", expected);
-	debug writefln("Actual  : %s", codeTree);
-	assert(0, format("Expected %s construct objects but got %s (testline %s)",
-                         expected.length, codeTree.length, testLine));
-      }
-      foreach(i; 0..expected.length) {
-	if(!codeTree[i].equals(expected[i])) {
-	  debug writefln("Expected: %s", expected[i]);
-	  debug writefln("Actual  : %s", codeTree[i]);
-	  debug stdout.flush();
-	  assert(0, format("Construct at index %s does not match (testline %s)", i, testLine));
-	}
+    auto codeTree = parse(code);
+    if(codeTree.length != expected.length) {
+      debug writefln("Expected: %s", expected);
+      debug writefln("Actual  : %s", codeTree);
+      assert(0, format("Expected %s construct objects but got %s (testline %s)",
+		       expected.length, codeTree.length, testLine));
+    }
+    foreach(i; 0..expected.length) {
+      if(!codeTree[i].equals(expected[i])) {
+	debug writefln("Expected: %s", expected[i]);
+	debug writefln("Actual  : %s", codeTree[i]);
+	debug stdout.flush();
+	assert(0, format("Construct at index %s does not match (testline %s)", i, testLine));
       }
     }
   }
@@ -843,7 +926,7 @@ unittest
       stdout.flush();
     }
     try {
-      auto codeTree = parse!(Appender!(const(ConstructObject)[]))(cast(string)code);
+      auto codeTree = parse(cast(string)code);
       assert(0, format("Expected exception '%s' but did not get one. (testline %s) Code=\"%s\"",
 		       expectedError, testLine, AsciiPrintString(code)));
     } catch(ConstructCFamilyParseException e) {
@@ -866,17 +949,19 @@ unittest
 
   testError(ErrorType.invalidChar, "}");
   testError(ErrorType.invalidChar, ")");
-
+  testError(ErrorType.invalidChar, "]");
   testError(ErrorType.endedEarly, "{");
   testError(ErrorType.endedEarly, "(");
+  testError(ErrorType.endedEarly, "[");
+
   testError(ErrorType.invalidChar, "{)");
   testError(ErrorType.invalidChar, "(}");
 
   test("{}", [block(1)]);
-  test("()", [list(1)]);
+  test("()", [parenList(1)]);
   test("{;}", [block(1, break_)]);
-  test("(;)", [list(1, break_)]);
-  test("(,)", [list(1, listBreak)]);
+  test("(;)", [parenList(1, break_)]);
+  test("(,)", [parenList(1, symbol(1, ","))]);
 
   testError(ErrorType.endedEarly, "/");
   testError(ErrorType.invalidChar, "/+");
@@ -889,13 +974,13 @@ unittest
   testError(ErrorType.endedEarly, "/*");
   testError(ErrorType.endedEarly, "/* *");
   test(".notAArg", [symbol(1, "."), symbol(1, "notAArg")]);
-  testError(ErrorType.invalidChar, "[notAParm]");
+  test("[notAParm]", [bracketList(1, symbol(1, "notAParm"))]);
   testError(ErrorType.invalidChar, "}");
 
   for(uint i = 0; i < 128; i++) {
     auto charFlags = lookupCharFlags(i);
-    auto isOperatorChar = (charFlags & CharFlags.validOperatorChar);
-    if(!isFirstCharacterOfSymbol(i) && !isOperatorChar &&
+    auto operatorKind = charFlags.getOperatorKind();
+    if(!isFirstCharacterOfSymbol(i) && operatorKind == CharOperatorKind.none &&
        i != ' ' && i != '\t' && i != '\r' && i != '\n' && i != '\'' &&
        i != '/' && i != '(' && i != '{' && i != ';' && i != '"' &&
        !(i >= '0' && i <= '9')) {
@@ -924,19 +1009,21 @@ unittest
   testError(ErrorType.endedEarly, "a (;");
   testError(ErrorType.invalidChar, "a )");
 
-  test("a ()", [symbol(1, "a"), list(1)]);
-  test("a();"  , [symbol(1, "a"), list(1), break_]);
-  test("a ();" , [symbol(1, "a"), list(1), break_]);
-  test("a () ;", [symbol(1, "a"), list(1), break_]);
+  test("a", [symbol(1, "a")]);
+  test(" ()", [parenList(1)]);
+  test("a ()", [symbol(1, "a"), parenList(1)]);
+  test("a();"  , [symbol(1, "a"), parenList(1), break_]);
+  test("a ();" , [symbol(1, "a"), parenList(1), break_]);
+  test("a () ;", [symbol(1, "a"), parenList(1), break_]);
 
   testError(ErrorType.endedEarly, "a(first");
-  test("a(first)", [symbol(1, "a"), list(1, [symbol(1, "first")])]);
-  test("a(first)", [symbol(1, "a"), list(1, [symbol(1, "first")])]);
-  test("a (first);", [symbol(1, "a"),list(1, symbol(1, "first")), break_]);
-  test("a ( first )  ;", [symbol(1, "a"),list(1, symbol(1, "first")), break_]);
-  test("a /*comment*/(/*another*/first/*what*/)/*hey*/;", [symbol(1, "a"),list(1, symbol(1, "first")), break_]);
+  test("a(first)", [symbol(1, "a"), parenList(1, symbol(1, "first"))]);
+  test("a(first)", [symbol(1, "a"), parenList(1, symbol(1, "first"))]);
+  test("a (first);", [symbol(1, "a"), parenList(1, symbol(1, "first")), break_]);
+  test("a ( first )  ;", [symbol(1, "a"), parenList(1, symbol(1, "first")), break_]);
+  test("a /*comment*/(/*another*/first/*what*/)/*hey*/;", [symbol(1, "a"), parenList(1, symbol(1, "first")), break_]);
 
-  test("a (first second);", [symbol(1, "a"), list(1, symbol(1, "first"), symbol(1, "second")), break_]);
+  test("a (first second);", [symbol(1, "a"), parenList(1, symbol(1, "first"), symbol(1, "second")), break_]);
 
   testError(ErrorType.invalidChar, "/a");
   testError(ErrorType.invalidChar, "a/;");
@@ -946,20 +1033,20 @@ unittest
   testError(ErrorType.invalidChar, "abc/a");
   testError(ErrorType.invalidChar, "abc/string");
   testError(ErrorType.invalidChar, "/ a ");
-  testError(ErrorType.invalidChar, "//*\n)");
   testError(ErrorType.endedEarly, "/*/");
+  testError(ErrorType.invalidChar, "//*\n)");
   test("/**/");
   test("/***/");
-
-  test("abc ();", [symbol(1, "abc"), list(1), break_]);
-  test("abc (a def);", [symbol(1, "abc"), list(1, symbol(1, "a"), symbol(1, "def")), break_]);
+  
+  test("abc ();", [symbol(1, "abc"), parenList(1), break_]);
+  test("abc (a def);", [symbol(1, "abc"), parenList(1, symbol(1, "a"), symbol(1, "def")), break_]);
 
   test("a ;", [symbol(1, "a"), break_]);
   test("a {}", [symbol(1, "a"), block(1)]);
   test("a {b;c;} ;", [symbol(1, "a"), block(1, symbol(1, "b"), break_, symbol(1, "c"), break_), break_]);
-  test("a ({b;c;}) ;", [symbol(1, "a"), list(1, block(1, symbol(1, "b"), break_, symbol(1, "c"), break_)), break_]);
-  test("a ( ({b;c;}) ) ;", [symbol(1, "a"), list(1, list(1, block(1, symbol(1, "b"), break_, symbol(1, "c"), break_))), break_]);
-  test("a ({b;c;}) {}", [symbol(1, "a"), list(1, block(1, symbol(1, "b"), break_, symbol(1, "c"), break_)), block(1)]);
+  test("a ({b;c;}) ;", [symbol(1, "a"), parenList(1, block(1, symbol(1, "b"), break_, symbol(1, "c"), break_)), break_]);
+  test("a ( ({b;c;}) ) ;", [symbol(1, "a"), parenList(1, parenList(1, block(1, symbol(1, "b"), break_, symbol(1, "c"), break_))), break_]);
+  test("a ({b;c;}) {}", [symbol(1, "a"), parenList(1, block(1, symbol(1, "b"), break_, symbol(1, "c"), break_)), block(1)]);
   // Primitive  types
   test("a int;" , [symbol(1, "a"), symbol(1, "int"), break_]);
   test("a uint;" , [symbol(1, "a"), symbol(1, "uint"), break_]);
@@ -995,9 +1082,9 @@ unittest
   test("'abc /**/", [string_(1, "abc")]);
 
   // List Breaks
-  test("a (c,d,e);", [symbol(1, "a"), list(1, symbol(1, "c"), listBreak,
-                                           symbol(1, "d"), listBreak,
-                                           symbol(1, "e")), break_]);
+  test("a (c,d,e);", [symbol(1, "a"), parenList(1, symbol(1, "c"), symbol(1, ","),
+                                                symbol(1, "d"), symbol(1, ","),
+                                                symbol(1, "e")), break_]);
 
   /+
   // Named Args
@@ -1123,13 +1210,15 @@ unittest
   test("=",   [symbol(1, "=")]);
   test("+=",  [symbol(1, "+=")]);
   test("-=",  [symbol(1, "-=")]);
-  test("*=",  [symbol(1, "*=")]);
+  //test("*=",  [symbol(1, "*=")]);
   //test("/=",  [symbol(1, "/=")]); TODO: FIX THIS CASE (problem with comments)
-  test("%=",  [symbol(1, "%=")]);
+  //test("%=",  [symbol(1, "%=")]);
   test("<<=", [symbol(1, "<<=")]);
   test(">>=", [symbol(1, ">>=")]);
   test("&=",  [symbol(1, "&=")]);
-  test("^=",  [symbol(1, "^=")]);
+  //test("^=",  [symbol(1, "^=")]);
   test("|=",  [symbol(1, "|=")]);
+  testError(ErrorType.endedEarly, "=<=(");
+  testError(ErrorType.invalidChar, "=<=)");
 }
 

@@ -19,15 +19,13 @@ struct ConstructParser {
   const(ConstructObject)[] function(string code) pure func;
 }
 
-template standardParser(T) {
-  immutable(ConstructParser) standardParser = immutable ConstructParser("Standard", &construct.standardParser.parse!T);
-}
+auto standardParser = immutable ConstructParser("Standard", &construct.standardParser.parse);
 
 ConstructParser getParser(T)(const(char)[] filename) if(isConstructBuilder!T)
 {
   auto extension = filename.extension;
   if(extension.length == 0|| extension == ".con") {
-    return standardParser!T;
+    return standardParser;
   }
   if(extension == ".json") {
     throw new Exception("json parser not implemented");

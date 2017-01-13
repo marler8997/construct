@@ -86,7 +86,7 @@ foreach (index, item in ("first" "second")) {
   }
 }
 
-defcon printList(items list) {
+defcon printList(items parenList) {
   foreach(index, item in items) {
     message "foreach[" index "] " item;
   }

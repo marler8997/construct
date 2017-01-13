@@ -44,7 +44,16 @@ const(ConstructResult) nullHandler(ConstructProcessor* processor, const(Construc
 immutable nullConstructDefinition = new immutable InternalPatternConstructDefinition
   ("null", [immutable PatternHandler(&nullHandler, null, null)], null, ConstructAttributes.init, null);
 
-immutable oneTypePattern = [immutable PatternNode("type", CountType.one, Raw.off, PrimitiveType.type)];
+const(ConstructResult) commaHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
+                                   Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
+{
+  return const ConstructResult(constructSymbol);
+}
+immutable commaConstructDefinition = new immutable InternalPatternConstructDefinition
+  (",", [immutable PatternHandler(&commaHandler, null, null)], null, ConstructAttributes.init, null);
+
+immutable oneTypePattern = [immutable PatternNode("type", CountType.one, PatternNodeFlags.none, PrimitiveType.type)];
+/*
 struct ListOfConstruct
 {
   private static const(ConstructResult) handler(ConstructProcessor* processor, const(ConstructDefinition) def,
@@ -60,6 +69,7 @@ struct ListOfConstruct
   static immutable definition = new immutable InternalPatternConstructDefinition
     ("listOf", [immutable PatternHandler(&handler, null, oneTypePattern)], null, ConstructAttributes.init, null);
 }
+*/
 // I think this has to be defined early because it is used to process constructs
 class DefaultStatementModeConstruct
 {
@@ -381,10 +391,13 @@ void generateConstructCode(PureStringSink sink, const(ConstructName) constructSy
   sink("}\n");
 }
 
+
 mixin(formattedString!(generateConstructCode)
       (ConstructName("pattern"), [ConstructPatternHandler.fromDataStructure!
-				  (q{immutable Pattern(null, [immutable PatternNode("patternList", CountType.one, Raw.on, PrimitiveType.list)])})(q{
-   return ConstructResult(new ConstructPattern(patternList.lineNumber, processPattern(processor, definition, patternList)));
+				  (q{immutable Pattern(null, [immutable PatternNode("patternStart", CountType.one, PatternNodeFlags.raw, KeywordType.openParens),
+							      immutable PatternNode("patternObjects", CountType.many, PatternNodeFlags.none, PrimitiveType.anything),
+							      immutable PatternNode("_", CountType.one, PatternNodeFlags.raw, KeywordType.closeParens),])})(q{
+   return ConstructResult(new ConstructPattern(patternStart.lineNumber, processPattern(processor, definition, patternObjects, patternStart.lineNumber)));
 })]));
 
 //
@@ -400,15 +413,15 @@ void generatePatternConstructCode(PureStringSink sink, const(ConstructName) symb
 //
 // More extended primitives
 // These primitives have patterns that rely on the basic primitives
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("let"), "(name raw symbol, value, break_ optional constructBreak)", q{
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("let"), "(name raw symbol, value, break_ optional raw \";\")", q{
   processor.addSymbol(name.value, value);
   return const ConstructResult((break_ is null) ? value : null);
 }));
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("set"), "(name raw symbol, value, break_ optional constructBreak)", q{
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("set"), "(name raw symbol, value, break_ optional raw \";\")", q{
   processor.setSymbol(name.lineNumber, name.value, value);
   return const ConstructResult((break_ is null) ? value : null);
 }));
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("letset"), "(name raw symbol, value, break_ optional constructBreak)", q{
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("letset"), "(name raw symbol, value, break_ optional raw \";\")", q{
   processor.letSetSymbol(name.value, value);
   return const ConstructResult((break_ is null) ? value : null);
 }));
@@ -424,10 +437,11 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("exec"), "(co
 }));
 
 mixin(formattedString!(generateConstructCode)
-      (ConstructName("defcon"), [ConstructPatternHandler.fromPattern("(name raw symbol, patternList list, _ constructBreak)", q{
+      (ConstructName("defcon"), [ConstructPatternHandler.fromPattern
+				 ("(name raw symbol, patternList raw parenList,  _ raw \";\")", q{
     ConstructAttributes attributes;
 
-    auto processedPattern = processPattern(processor, definition, patternList);
+    auto processedPattern = processPattern(processor, definition, patternList.objects, patternList.lineNumber);
     throw imp("backend constructs");
     /+
      auto backendFunc = loadConstructBackend(name.value);
@@ -439,10 +453,11 @@ mixin(formattedString!(generateConstructCode)
      (/*Pattern(nodes), */constructSymbol.lineNumber, processor.currentFile.name, attributes, null, requiredParams, null, backendFunc));
      return null;
      +/
-}), ConstructPatternHandler.fromPattern("(name raw symbol, patternList list, implementation constructBlock)", q{
+  }), ConstructPatternHandler.fromPattern
+				 ("(name raw symbol, patternList parenList, implementation constructBlock)", q{
 
     ConstructAttributes attributes;
-    auto processedPattern = processPattern(processor, definition, patternList);
+    auto processedPattern = processPattern(processor, definition, patternList.objects, patternList.lineNumber);
 
     //
     // Check if current scope has a construct with the same name
@@ -520,6 +535,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("symbolRef"),
 }));
 
 mixin(formattedString!(generatePatternConstructCode)
+      // TODO: probably want to require '(' ')' or raw parenList for the condition
       (ConstructName("if"), "(condition predicate, trueCase constructBlock)", q{
   if(condition.isTrue) {
     processor.pushScope(trueCase.lineNumber, ScopeType.block, true);
@@ -552,12 +568,12 @@ const(ConstructObject) ifConstructHandler(ConstructProcessor* processor,
 
 
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("importBackendPackage"),
-     //"(packageName raw symbol, limitList optional pattern(_ \":\", includeSymbolList many raw symbol), _ constructBreak)", q{
-     "(packageName raw symbol, _ constructBreak)", q{
+     //"(packageName raw symbol, limitList optional pattern(_ \":\", includeSymbolList many raw symbol), _ raw \";\")", q{
+     "(packageName raw symbol, _ raw \";\")", q{
       importBackendPackage(processor, packageName.value, null);//limitList.includeSymbolList);
       return ConstructResult(null);
 }));
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("loadBackendType"), "(typeName raw symbol, _ constructBreak)", q{
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("loadBackendType"), "(typeName raw symbol, _ raw \";\")", q{
       auto backendType = loadBackendType(typeName.value);
       processor.addSymbol(typeName.value, backendType);
       return ConstructResult(null);
@@ -567,7 +583,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("makeTypeFrom
       return ConstructResult(new immutable ConstructUserDefinedType(constructSymbol.lineNumber, parentType.immutable_).unconst);
 }));
 */
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("deftype"), "(typeName raw symbol, _ raw \"inheritFrom\", parentType type, _ constructBreak)", q{
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("deftype"), "(typeName raw symbol, _ raw \"inheritFrom\", parentType type, _ raw \";\")", q{
       processor.addSymbol(typeName.value, new immutable ConstructUserDefinedType(typeName.lineNumber, typeName.value, parentType.immutable_));
       return ConstructResult(null);
 }));
@@ -605,11 +621,11 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("assert"), "(
       return ConstructResult(null);
 }));
 
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("throw"), "(message string, _ constructBreak)", q{
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("throw"), "(message string, _ raw \";\")", q{
     throw new ConstructThrownException(constructSymbol.lineNumber, processor, message.toUtf8());
 }));
 /*
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("throw"), "(messageObjects oneOrMore string, _ constructBreak)", q{
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("throw"), "(messageObjects oneOrMore string, _ raw \";\")", q{
   auto messageBuilder = appender!(char[])(256);
   foreach(messageObject; messageObjects.length) {
     messageObject.toString(messageBuilder.put);
@@ -617,13 +633,14 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("throw"), "(m
   throw new ConstructThrownException(constructSymbol.lineNumber, processor, cast(string)messageBuilder.data);
 }));
 */
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("return"), "(value, _ constructBreak)", q{
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("return"), "(value, _ raw \";\")", q{
   return const ConstructResult(value, ConstructResult.Action.return_);
 }));
 
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("not"), "(value predicate)", q{
       return const ConstructResult(new ConstructBool(constructSymbol.lineNumber, !value.isTrue));
 }));
+/*
 // NOTE: should probably be a "dotted" keyword operator
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("itemType"), "(this list)", q{
     auto typeObject = this_.itemType.definition.typeObject;
@@ -632,6 +649,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("itemType"), 
     }
     return const ConstructResult(typeObject);
 }));
+*/
 
 //
 // String Operations
@@ -833,7 +851,98 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("addSymbolsTo
 //
 // Foreach
 //
-immutable foreachConstructDefinition = new immutable FunctionConstructDefinition
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("foreach"), "(loopArgs raw parenList, loopCode constructBlock)", q{
+
+  //
+  // Parse the foreach iteration list
+  //
+  string indexVar = null;
+  string itemVar;
+  ConstructList list;
+  {
+    size_t listIndex = 0;
+    if(listIndex >= loopArgs.objects.length) {
+      throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list is incomplete");
+    }
+    itemVar = processor.consumeSymbol(definition, constructSymbol, loopArgs.objects, &listIndex).value;
+
+    if(listIndex >= loopArgs.objects.length) {
+      throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list is incomplete");
+    }
+    auto next = loopArgs.objects[listIndex++].unconst;
+    if(next.isSymbolOf(",")) {
+      indexVar = itemVar;
+      itemVar = processor.consumeSymbol(definition, constructSymbol, loopArgs.objects, &listIndex).value;
+      if(listIndex >= loopArgs.objects.length) {
+        throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list is incomplete");
+      }
+      next = loopArgs.objects[listIndex++].unconst;
+    }
+
+    if(auto inSymbol = next.tryAsConstructSymbol) {
+    } else {
+      throw processor.semanticError(constructSymbol.lineNumber, format
+                                    ("foreach expected an 'in' symbol but got %s: %s",
+                                     An(next.typeName), next));
+    }
+
+    if(listIndex >= loopArgs.objects.length) {
+      throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list is incomplete");
+    }
+    auto result = processor.consumeValueAlreadyCheckedIndex(definition, loopArgs.objects, &listIndex);
+    if(result.hasAction) {
+      throw imp("foreach list has an action!");
+    }
+    if(result.object is null) {
+      throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list got a void expression");
+    }
+    if(listIndex < loopArgs.objects.length) {
+      throw processor.semanticError(constructSymbol.lineNumber, "foreach iteration list has too many items");
+    }
+
+    // TODO: I don't want this matching block or bracket lists
+    list = result.object.tryAsConstructList.unconst;
+    if(!list) {
+      throw processor.semanticError(constructSymbol.lineNumber, format
+                                    ("foreach requires a list but got %s", An(result.object.typeName)));
+    }
+    // Make sure it wasn't a block or bracket list
+    if(result.object.tryAsConstructBlock || result.object.tryAsConstructBracketList) {
+      throw processor.semanticError(constructSymbol.lineNumber, format
+                                    ("foreach requires a list but got %s", An(result.object.typeName)));
+    }
+  }
+
+  if(list.objects.length > 0) {
+    processor.pushScope(loopCode.lineNumber, ScopeType.block, true);
+    ConstructUint indexObject = null;
+    scope(exit) { processor.popScope(); }
+    if(indexVar) {
+      indexObject = new ConstructUint(loopArgs.lineNumber, BigInt(0));
+      processor.addSymbol(indexVar, indexObject);
+    }
+    processor.addSymbol(itemVar, list.objects[0]);
+
+    auto firstResult = processor.processBlock(loopCode.objects);
+    if(firstResult.isReturn) {
+      return firstResult;
+    }
+    foreach(listObject; list.objects[1..$]) {
+      processor.setSymbol(constructSymbol.lineNumber, itemVar, listObject);
+      if(indexObject) {
+        indexObject.value++;
+      }
+      auto result = processor.processBlock(loopCode.objects);
+      if(result.isReturn) {
+        return result;
+      }
+    }
+  }
+
+  return ConstructResult(null);
+    }));
+/*
+      immutable foreachConstructDefinition = new immutable FunctionConstructDefinition
   ("foreach", __LINE__, __FILE__, ConstructAttributes.init, null, &foreachConstructHandler);
 const(ConstructResult) foreachConstructHandler(ConstructProcessor* processor,
                                            const(ConstructDefinition) definition,
@@ -926,6 +1035,7 @@ const(ConstructResult) foreachConstructHandler(ConstructProcessor* processor,
 
   return ConstructResult(null);
 }
+  */
 
 //
 // Modes
@@ -945,9 +1055,9 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("createStatem
   return const ConstructResult(new ConstructStatementMode(constructSymbol.lineNumber, new immutable PatternConstructDefinition
                                                           (null, [immutable PatternHandler
                                                                   (&handleConstructWithBlock, handlerBlock.immutable_,
-                                                                   [immutable PatternNode(source.value, CountType.optional, Raw.off, PrimitiveType.anything),
-                                                                    immutable PatternNode(result.value, CountType.optional, Raw.off, PrimitiveType.anything),
-                                                                    immutable PatternNode("action", CountType.optional, Raw.off, PrimitiveType.anything)])],
+                                                                   [immutable PatternNode(source.value, CountType.optional, PatternNodeFlags.none, PrimitiveType.anything),
+                                                                    immutable PatternNode(result.value, CountType.optional, PatternNodeFlags.none, PrimitiveType.anything),
+                                                                    immutable PatternNode("action", CountType.optional, PatternNodeFlags.none, PrimitiveType.anything)])],
                                                            null, constructSymbol.lineNumber, cast(string)processor.currentFile.relativeName, attributes, null)));
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("getStatementMode"), "()", q{

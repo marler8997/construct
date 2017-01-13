@@ -56,21 +56,27 @@ const(ConstructResult) messageHandler(ConstructProcessor* processor,
   // wrap in debug to retain purity
   debug {
     while(true) {
+      size_t nextIndex = *argIndex;
+      if(nextIndex > objects.length) {
+        throw processor.semanticError(constructSymbol.lineNumber, "message construct missing the ending ';'");
+      }
+      if(objects[nextIndex].isSymbolOf(";")) {
+        // message construct done
+        (*argIndex)++;
+        break;
+      }
       auto result = processor.consumeValue(definition, constructSymbol, objects, argIndex).unconst;
       if(result.hasAction) {
         throw processor.semanticError(constructSymbol.lineNumber, "the message construct does not handle action constructs");
       }
-      if(printObject(processor, constructSymbol, result.object.unconst)) {
-        break;
-      }
+      printObject(processor, constructSymbol, result.object.unconst);
     }
     writeln();
     stdout.flush();
   }
   return ConstructResult(null);
 }
-// Returns: true if it encountered an object break
-static bool printObject(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol, ConstructObject object)
+static void printObject(ConstructProcessor* processor, const(ConstructSymbol) constructSymbol, ConstructObject object)
 {
   while(true) {
     if(object is null) {
@@ -80,14 +86,10 @@ static bool printObject(ConstructProcessor* processor, const(ConstructSymbol) co
       object = optionalValue.value.unconst;
       if(object is null) {
         write("<optional-no-value>");
-        return false;
+        return;
       }
     }
     break;
-  }
-
-  if(object.isObjectBreak) {
-    return true;
   }
 
   if(auto string_ = object.tryAsConstructString) {
@@ -99,12 +101,12 @@ static bool printObject(ConstructProcessor* processor, const(ConstructSymbol) co
   } else if(auto symbol = object.tryAsConstructSymbol) {
     write("symbol:");
     write(symbol.value);
-  } else if(auto list = object.tryAsConstructList) {
-    write("(");
+  } else if(auto tuple = object.tryAsConstructTuple) {
+    write("tuple(");
     bool atFirst = true;
-    foreach(listItem; list.items) {
+    foreach(tupleItem; tuple.objects) {
       if(atFirst) atFirst = false; else write(" ");
-      printObject(processor, constructSymbol, listItem.unconst);
+      printObject(processor, constructSymbol, tupleItem.unconst);
     }
     write(")");
   } else {
@@ -112,13 +114,12 @@ static bool printObject(ConstructProcessor* processor, const(ConstructSymbol) co
       auto nullable = object.tryAsConstructNullable;
       if(nullable && nullable.isNull) {
         write("<null>");
-        return false;
+        return;
       }
     }
 
     throw imp(format("message printing object of type %s", object.typeName));
   }
-  return false;
 }
 const(ConstructResult) openFileHandler(ConstructProcessor* processor,
                                        const(ConstructDefinition) definition,

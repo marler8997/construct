@@ -24,8 +24,6 @@ enum PrimitiveTypeEnum {
   optionalValue,
   comment,
 
-  constructBreak,
-
   type,
 
   symbol,
@@ -44,9 +42,17 @@ enum PrimitiveTypeEnum {
   uni,
 
   construct,
-  constructBlock,
 
-  list,
+  // For constructs like foreach where they can take a
+  // raw source parenList, or even a runtime generated list,
+  // maybe there should be a type for this?
+  constructList,
+  constructDelimitedList,
+  constructBlock,
+  parenList,
+  constructBracketList,
+  tuple,
+
   constructPattern,
   class_,
 
@@ -68,6 +74,7 @@ enum PrimitiveTypeEnum {
   */
 
   statementMode,
+  patternNode,
 }
 
 struct PrimitiveTypeDefinition
@@ -102,8 +109,6 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
    //PrimitiveTypeDefinition("void"     , PrimitiveTypeEnum.void_    , PrimitiveTypeEnum.anything),
    PrimitiveTypeDefinition("comment"  , PrimitiveTypeEnum.comment  , PrimitiveTypeEnum.anything),
 
-   PrimitiveTypeDefinition("constructBreak", PrimitiveTypeEnum.constructBreak, PrimitiveTypeEnum.anything, PrimitiveType.constructBreak, "ObjectBreak"),
-
    PrimitiveTypeDefinition("type"     , PrimitiveTypeEnum.type     , PrimitiveTypeEnum.anything, PrimitiveType.type    , "ConstructType"),
 
    PrimitiveTypeDefinition("symbol"   , PrimitiveTypeEnum.symbol   , PrimitiveTypeEnum.anything, PrimitiveType.symbol  , "ConstructSymbol"),
@@ -123,10 +128,16 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
    PrimitiveTypeDefinition("uni"      , PrimitiveTypeEnum.uni      , PrimitiveTypeEnum.anything),
 
    PrimitiveTypeDefinition("construct"     , PrimitiveTypeEnum.construct     , PrimitiveTypeEnum.anything, null, "ConstructDefinition"),
-   PrimitiveTypeDefinition("constructBlock", PrimitiveTypeEnum.constructBlock, PrimitiveTypeEnum.anything, PrimitiveType.constructBlock, "ConstructBlock"),
 
-   PrimitiveTypeDefinition("list"            , PrimitiveTypeEnum.list        , PrimitiveTypeEnum.anything, PrimitiveType.list, "ConstructList"),
-   // A constructPattern is a type and a list
+   
+   PrimitiveTypeDefinition("constructList", PrimitiveTypeEnum.constructList, PrimitiveTypeEnum.anything, PrimitiveType.constructList, "ConstructList"),
+   PrimitiveTypeDefinition("constructDelimitedList", PrimitiveTypeEnum.constructDelimitedList, PrimitiveTypeEnum.constructList, PrimitiveType.constructDelimitedList, "ConstructDelimitedList"),
+   PrimitiveTypeDefinition("constructBlock", PrimitiveTypeEnum.constructBlock, PrimitiveTypeEnum.constructDelimitedList, PrimitiveType.constructBlock, "ConstructBlock"),
+   PrimitiveTypeDefinition("parenList", PrimitiveTypeEnum.parenList, PrimitiveTypeEnum.constructDelimitedList, PrimitiveType.parenList, "ConstructParenList"),
+   PrimitiveTypeDefinition("constructBracketList", PrimitiveTypeEnum.constructBracketList, PrimitiveTypeEnum.constructDelimitedList, PrimitiveType.constructBracketList, "ConstructBracketList"),
+
+   PrimitiveTypeDefinition("tuple"         , PrimitiveTypeEnum.tuple, PrimitiveTypeEnum.anything, PrimitiveType.tuple, "ConstructTuple"),
+
    PrimitiveTypeDefinition("constructPattern", PrimitiveTypeEnum.constructPattern, PrimitiveTypeEnum.type, null, "ConstructPattern"),
    PrimitiveTypeDefinition("class"           , PrimitiveTypeEnum.class_          , PrimitiveTypeEnum.nullable, PrimitiveType.class_, "ConstructClass"),
 
@@ -174,6 +185,7 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
    PrimitiveTypeDefinition("limitUtf8"   , PrimitiveTypeEnum.limitUtf8     , PrimitiveTypeEnum.limitUnicode),
    */
    PrimitiveTypeDefinition("statementMode", PrimitiveTypeEnum.statementMode, PrimitiveTypeEnum.anything, PrimitiveType.statementMode, "ConstructStatementMode"),
+   PrimitiveTypeDefinition("patternNode", PrimitiveTypeEnum.patternNode, PrimitiveTypeEnum.anything, PrimitiveType.patternNode, "ConstructPatternNode"),
    ];
 
 PrimitiveTypeDefinition definition(PrimitiveTypeEnum typeEnum) pure nothrow @nogc @safe
@@ -608,6 +620,7 @@ class PrimitiveType : ConstructType
     return other && this.typeEnum == other.typeEnum;
   }
 
+  static immutable anything       = new PrimitiveType(0, PrimitiveTypeEnum.anything);
   static immutable predicate      = new PrimitiveType(0, PrimitiveTypeEnum.predicate);
   static immutable bool_          = new PrimitiveType(0, PrimitiveTypeEnum.bool_);
   static immutable number         = new PrimitiveType(0, PrimitiveTypeEnum.number);
@@ -619,22 +632,33 @@ class PrimitiveType : ConstructType
   static immutable string_        = new PrimitiveType(0, PrimitiveTypeEnum.string_);
   static immutable utf8           = new PrimitiveType(0, PrimitiveTypeEnum.utf8);
   static immutable symbol         = new PrimitiveType(0, PrimitiveTypeEnum.symbol);
-  static immutable anything       = new PrimitiveType(0, PrimitiveTypeEnum.anything);
   static immutable nullable       = new PrimitiveType(0, PrimitiveTypeEnum.nullable);
   static immutable optionalValue  = new PrimitiveType(0, PrimitiveTypeEnum.optionalValue);
   static immutable type           = new PrimitiveType(0, PrimitiveTypeEnum.type);
-  static immutable constructBlock = new PrimitiveType(0, PrimitiveTypeEnum.constructBlock);
+  static immutable constructList   = new PrimitiveType(0, PrimitiveTypeEnum.constructList);
+  static immutable constructDelimitedList = new PrimitiveType(0, PrimitiveTypeEnum.constructDelimitedList);
+  static immutable constructBlock         = new PrimitiveType(0, PrimitiveTypeEnum.constructBlock);
+  static immutable parenList      = new PrimitiveType(0, PrimitiveTypeEnum.parenList);
+  static immutable constructBracketList   = new PrimitiveType(0, PrimitiveTypeEnum.constructBracketList);
+  static immutable tuple          = new PrimitiveType(0, PrimitiveTypeEnum.tuple);
   static immutable pointer        = new PrimitiveType(0, PrimitiveTypeEnum.pointer);
-  static immutable list           = new PrimitiveType(0, PrimitiveTypeEnum.list);
   static immutable class_         = new PrimitiveType(0, PrimitiveTypeEnum.class_);
-  static immutable constructBreak = new PrimitiveType(0, PrimitiveTypeEnum.constructBreak);
   static immutable statementMode  = new PrimitiveType(0, PrimitiveTypeEnum.statementMode);
+  static immutable patternNode    = new PrimitiveType(0, PrimitiveTypeEnum.patternNode);
 }
 
 class KeywordType : ConstructType
 {
   string keyword;
   this(size_t lineNumber, string keyword) inout pure
+  {
+    super(lineNumber);
+    // TODO: I could validate that the keyword is a valid symbol,
+    //       or use another constructor that passes in a symbol that's
+    //       already been verified to be valid
+    this.keyword = keyword;
+  }
+  this(size_t lineNumber, string keyword) immutable pure
   {
     super(lineNumber);
     // TODO: I could validate that the keyword is a valid symbol,
@@ -681,6 +705,9 @@ class KeywordType : ConstructType
   {
     return this.keyword == other.keyword;
   }
+
+  static immutable openParens = new immutable KeywordType(0, "(");
+  static immutable closeParens = new immutable KeywordType(0, ")");
 }
 class ConstructUserDefinedType : ConstructType
 {
@@ -861,7 +888,48 @@ class ConstructClassDefinition : ConstructType
     return this.name == other.name;
   }
 }
+class ConstructTuple : ConstructObject
+{
+  const(ConstructObject)[] objects;
+  this(size_t lineNumber, const(ConstructObject)[] objects) pure
+  {
+    super(lineNumber);
+    this.objects = objects;
+  }
 
+  mixin finalTypeNameMembers!"tuple";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.tuple);
+  enum processorValueType = "ConstructTuple";
+  @property final override inout(ConstructTuple) tryAsConstructTuple() inout pure { return this; }
+  final override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    sink("tuple(");
+    if(objects.length > 0) {
+      objects[0].toString(sink);
+      foreach(object; objects[1..$]) {
+	sink(" ");
+	object.toString(sink);
+      }
+    }
+    sink(")");
+  }
+  mixin virtualEqualsMember!ConstructTuple;
+  final bool typedEquals(const(ConstructTuple) other) const pure
+  {
+    if(objects.length != other.objects.length) {
+      //writefln("[DEBUG] mismatched length");
+      return false;
+    }
+    foreach(i; 0..objects.length) {
+      if(!objects[i].equals(other.objects[i])) {
+	//writefln("[DEBUG] mismatched item %s", i);
+	return false;
+      }
+    }
+    return true;
+  }
+}
+/*
 class ConstructTypedListType : ConstructType
 {
   const(ConstructType) itemType;
@@ -902,6 +970,7 @@ class ConstructTypedListType : ConstructType
     return this.itemType.equals(other.itemType);
   }
 }
+*/
 class ConstructOptionalOf : ConstructType
 {
   ConstructType ofType;
@@ -1436,3 +1505,84 @@ class ConstructStatementMode : ConstructObject
   }
 }
 
+class ConstructPatternNode : ConstructObject
+{
+  PatternNode node;
+  this(size_t lineNumber, PatternNode node) pure
+  {
+    super(lineNumber);
+    this.node = node;
+  }
+  this(size_t lineNumber, immutable(PatternNode) node) pure immutable
+  {
+    super(lineNumber);
+    this.node = node;
+  }
+  enum staticTypeName = "patternNode";
+  enum staticPrimitiveTypeEnum = PrimitiveTypeEnum.patternNode;
+
+  mixin finalTypeNameMembers!"patternNode";
+  mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.patternNode);
+
+  enum processorValueType = "ConstructPatternNode";
+
+  @property final override inout(ConstructPatternNode) tryAsConstructPatternNode() inout pure { return this; }
+
+  final override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    throw imp();
+  }
+  mixin virtualEqualsMember!ConstructPatternNode;
+  final bool typedEquals(const(ConstructPatternNode) other) const pure
+  {
+    throw imp();
+    /*
+    return other &&
+      this.sourceVar == other.sourceVar &&
+      this.resultVar == other.resultVar &&
+      this.handlerBlock == other.handlerBlock;
+    */
+  }
+}
+
+class ConstructList : ConstructObject
+{
+  const(ConstructObject)[] objects;
+  protected this(size_t lineNumber, const(ConstructObject)[] objects) pure
+  {
+    super(lineNumber);
+    this.objects = objects;
+  }
+
+  enum processorValueType = "ConstructList";
+  @property final override inout(ConstructList) tryAsConstructList() inout pure { return this; }
+  /*
+  final override void toString(scope void delegate(const(char)[]) sink) const
+  {
+    sink(OpenMap[cast(ubyte)delimiterPair..cast(ubyte)(delimiterPair+1)]);
+    if(objects.length > 0) {
+      objects[0].toString(sink);
+      foreach(object; objects[1..$]) {
+	sink(" ");
+	object.toString(sink);
+      }
+    }
+    sink(CloseMap[cast(ubyte)delimiterPair..cast(ubyte)(delimiterPair+1)]);
+  }
+  */
+  mixin virtualEqualsMember!ConstructList;
+  final bool typedEquals(const(ConstructList) other) const pure
+  {
+    if(objects.length != other.objects.length) {
+      //writefln("[DEBUG] mismatched length");
+      return false;
+    }
+    foreach(i; 0..objects.length) {
+      if(!objects[i].equals(other.objects[i])) {
+	//writefln("[DEBUG] mismatched item %s", i);
+	return false;
+      }
+    }
+    return true;
+  }
+}

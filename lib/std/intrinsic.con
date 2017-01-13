@@ -1,0 +1,7 @@
+// Define the '(' construct which allows you to
+// use parenthesis for execution precedence.
+// TODO: make sure this construct has a very high precedence!
+defcon ( (value, _ raw ")")
+{
+  return value;
+}

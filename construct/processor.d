@@ -230,6 +230,7 @@ struct ConstructProcessor
        "false"         : SymbolEntryList(falseConstructDefinition.unconst),
        "true"          : SymbolEntryList(trueConstructDefinition.unconst),
        "null"          : SymbolEntryList(nullConstructDefinition.unconst),
+       ","             : SymbolEntryList(commaConstructDefinition.unconst),
 
        //
        // Basic Constructs
@@ -252,11 +253,12 @@ struct ConstructProcessor
     addPrimitiveType(PrimitiveType.nullable);
     addPrimitiveType(PrimitiveType.type);
     addPrimitiveType(PrimitiveType.constructBlock);
+    addPrimitiveType(PrimitiveType.parenList);
+    addPrimitiveType(PrimitiveType.constructBracketList);
     addPrimitiveType(PrimitiveType.pointer);
-    addPrimitiveType(PrimitiveType.list);
     //addPrimitiveType(PrimitiveType.class_);
-    addPrimitiveType(PrimitiveType.constructBreak);
     addPrimitiveType(PrimitiveType.statementMode);
+    addPrimitiveType(PrimitiveType.patternNode);
   }
   private void addPrimitiveType(const(PrimitiveType) primitiveType) pure
   {
@@ -290,10 +292,10 @@ struct ConstructProcessor
     addConstruct(LetsetConstruct.definition);
     addConstruct(IfConstruct.definition);
     addConstruct(NotConstruct.definition);
-    addConstruct(foreachConstructDefinition);
-    addConstruct(ListOfConstruct.definition);
+    addConstruct(ForeachConstruct.definition);
+    //addConstruct(ListOfConstruct.definition);
     //currentScope.symbols["typeOf"]    = SymbolEntryList(singleton!TypeOfConstructDefinition());
-    addConstruct(ItemTypeConstruct.definition);
+    //addConstruct(ItemTypeConstruct.definition);
     //currentScope.symbols["typed"]     = SymbolEntryList(singleton!TypedConstructDefinition());
     //currentScope.symbols["memcpy"]    = SymbolEntryList(singleton!MemcpyConstructDefinition());
     //currentScope.symbols["return"]    = SymbolEntryList(singleton!ReturnConstructDefinition());
@@ -419,7 +421,7 @@ struct ConstructProcessor
         logDebug("relative import \"%s\" has already been imported (%s)", importName, importSourceFile.absoluteName);
         return;
       }
-      parser = standardParser!(Appender!(const(ConstructObject)[]));
+      parser = standardParser;
     } else {
 
       if(auto importEntry = importMap.get(importName, null)) {
@@ -445,7 +447,7 @@ struct ConstructProcessor
 
         importSourceFile.relativeName = buildNormalizedPath(importPath.relativePath, nameSubPath.setExtension(".con"));
         if(exists(importSourceFile.relativeName)) {
-          parser = standardParser!(Appender!(const(ConstructObject)[]));
+          parser = standardParser;
           logInfo("    FOUND AT: %s", importSourceFile.relativeName);
           break;
         } else {
@@ -453,7 +455,7 @@ struct ConstructProcessor
 
           importSourceFile.relativeName = importSourceFile.relativeName.stripExtension;
           if(exists(importSourceFile.relativeName)) {
-            parser = standardParser!(Appender!(const(ConstructObject)[]));
+            parser = standardParser;
             logInfo("    FOUND AT: %s", importSourceFile.relativeName);
             break;
           } else {
@@ -717,6 +719,8 @@ struct ConstructProcessor
   }
   const(ConstructResult) processBlock(const(ConstructObject)[] objects)
   {
+    ProcessingBlock blockProcessData = ProcessingBlock(objects);
+    
     size_t index = 0;
     size_t lineNumber = 0;
     while(index < objects.length) {
@@ -845,8 +849,12 @@ struct ConstructProcessor
         continue;
       }
 
+      if(node.matchesUntilNextNode) {
+	throw imp("untilNextNode");
+      }
+
       ConstructObject value;
-      if(node.raw) {
+      if(node.matchesRaw) {
 	value = objects[nextIndex++].unconst;
 	// handle the special macro construct
 	if(auto symbol = value.tryAsConstructSymbol) {
@@ -859,10 +867,18 @@ struct ConstructProcessor
 	  }
 	}
       } else {
-	auto result = consumeValueAlreadyCheckedIndex(constructContext, objects, &nextIndex).unconst;
+	auto saveIndex = nextIndex;
+	auto result = consumeValueAlreadyCheckedIndex(constructContext, objects, &nextIndex, true).unconst;
         if(result.hasAction) {
           throw imp("matchPattern, result has an action(2)!");
         }
+	if(result.object is null && saveIndex == nextIndex) {
+          if(!node.countType.isOptional) {
+	    //logDev("  matchPattern: not a match 1");
+            return false;
+          }
+	  continue;
+	}
         value = result.object;
       }
       if(value is null) {
@@ -921,7 +937,7 @@ struct ConstructProcessor
           break;
         }
         
-        if(node.raw) {
+        if(node.matchesRaw) {
           value = objects[nextIndex++].unconst;
           // handle the special macro construct
           if(auto symbol = value.tryAsConstructSymbol) {
@@ -991,8 +1007,8 @@ struct ConstructProcessor
                                                  const(ConstructObject) opParam, const(PatternHandler)[] patternHandlers, const(ConstructObject)[] objects, size_t* index)
 
   {
-    //enum STACK_STORAGE_COUNT = 512;
-    enum STACK_STORAGE_COUNT = 10; // use 10 for development
+    enum STACK_STORAGE_COUNT = 51;
+    //enum STACK_STORAGE_COUNT = 20; // use 20 for development
 
     PatternMatchStorage!STACK_STORAGE_COUNT args;
 
@@ -1063,7 +1079,7 @@ struct ConstructProcessor
   //
   // Assumption: *index < objects.length
   const(ConstructResult) consumeValueAlreadyCheckedIndex(const(IConstructContext) constructContext,
-                                                         const(ConstructObject)[] objects, size_t* index)
+                                                         const(ConstructObject)[] objects, size_t* index, bool returnOnUnresolvedSymbol = false)
   {
     assert(*index < objects.length);
 
@@ -1077,6 +1093,10 @@ struct ConstructProcessor
       logDebug("looking up symbol '%s' on line %s...", symbol.value, symbol.lineNumber);
       auto symbolEntries = tryLookupSymbol(symbol.value);
       if(!symbolEntries.first) {
+	if(returnOnUnresolvedSymbol) {
+	  (*index)--; // rewind
+	  return ConstructResult(null);
+	}
         throw semanticError(symbol.lineNumber, format("symbol '%s' does not exist", symbol.value));
       }
       if(symbolEntries.moreCount > 0) {
@@ -1235,6 +1255,44 @@ unittest
   */
 }
 
+
+struct Queue(T)
+{
+  enum DefaultInitialCapacity = 32;
+  
+  T[] buffer;
+  size_t count;
+  this(size_t initialSize)
+  {
+    this.buffer = new T[initialSize];
+  }
+  void put(T newValue)
+  {
+    if(count >= buffer.length) {
+      if(buffer.length == 0) {
+        buffer.length = DefaultInitialCapacity;
+      } else {
+        buffer.length *= 2;
+      }
+    }
+    buffer[count++] = newValue;
+  }
+}
+struct ProcessedObject
+{
+  bool raw;
+  size_t sourceObjectCount;
+  ConstructObject processedObject;
+}
+struct ProcessingBlock
+{
+  const(ConstructObject)[] sourceObjects;
+  size_t queueSourceIndex;
+  Queue!(ProcessedObject) processedObjects;
+}
+
+
+
 alias ProcessorFunc = const(ConstructResult) function(ConstructProcessor* processor,
                                                       const(ConstructDefinition) definition,
                                                       const(ConstructSymbol) constructSymbol,
@@ -1296,15 +1354,15 @@ const(ConstructResult) handleConstructWithBlock
         if(patternNode.countType == CountType.oneOrMore) {
           throw new Exception("code bug: a oneOrMore pattern node has 0 objects");
         }
-        // TODO: Maybe create a static ConstructList.NULL?
-        processor.addSymbol(patternNode.name, new ConstructList(0, null));
+        // TODO: Maybe create a static ConstructTuple.Empty or .Null?
+        processor.addSymbol(patternNode.name, new ConstructTuple(0, null));
       } else {
         // sanity check
         if(argIndex + arg.size > args.length) {
           throw new Exception("code bug: pattern node argument size is bigger than the given arguments");
         }
         // TODO: should I just pass in the type of the pattern node?
-        processor.addSymbol(patternNode.name, new ConstructList(0, cast(const(ConstructObject)[])args[argIndex..argIndex+arg.size]));
+        processor.addSymbol(patternNode.name, new ConstructTuple(0, cast(const(ConstructObject)[])args[argIndex..argIndex+arg.size]));
         argIndex += arg.size;
       }
     }
