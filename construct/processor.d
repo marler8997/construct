@@ -290,6 +290,7 @@ struct ConstructProcessor
     addConstruct(LetConstruct.definition);
     addConstruct(SetConstruct.definition);
     addConstruct(LetsetConstruct.definition);
+    addConstruct(MakeListConstruct.definition);
     addConstruct(IfConstruct.definition);
     addConstruct(NotConstruct.definition);
     addConstruct(ForeachConstruct.definition);
@@ -887,6 +888,9 @@ struct ConstructProcessor
 
       // todo: handle returns
 
+      // TODO: somehow here we should handle implicit conversions,
+      //       start by implementing a conversion from ConstructIntegerLiteral
+      //       to all the other integer types.
       if(!node.type.supportsValue(value)) {
         // NOTE: this block same as the *index >= objects.length block
         if(node.name == "_") {
@@ -1079,7 +1083,11 @@ struct ConstructProcessor
   //
   // Assumption: *index < objects.length
   const(ConstructResult) consumeValueAlreadyCheckedIndex(const(IConstructContext) constructContext,
-                                                         const(ConstructObject)[] objects, size_t* index, bool returnOnUnresolvedSymbol = false)
+                                                         const(ConstructObject)[] objects, size_t* index, bool undoOnCertainConditions = false)
+  // CertainConditions:
+  // * unresolved symbol
+  // * an empty parenList
+  // * a parenList with multiple items
   {
     assert(*index < objects.length);
 
@@ -1093,7 +1101,7 @@ struct ConstructProcessor
       logDebug("looking up symbol '%s' on line %s...", symbol.value, symbol.lineNumber);
       auto symbolEntries = tryLookupSymbol(symbol.value);
       if(!symbolEntries.first) {
-	if(returnOnUnresolvedSymbol) {
+	if(undoOnCertainConditions) {
 	  (*index)--; // rewind
 	  return ConstructResult(null);
 	}
@@ -1120,6 +1128,28 @@ struct ConstructProcessor
       } else {
         result.object = symbolEntries.first.tryAsConstructObject.unconst;
       }
+    } else if(auto parenList = result.object.tryAsConstructParenList.unconst) {
+      if(parenList.objects.length == 0) {
+	if(undoOnCertainConditions) {
+	  (*index)--; // rewind
+	  return ConstructResult(null);
+	}
+	throw semanticError(parenList.lineNumber, "got an empty parenList while matching a non-raw construct node");
+      }
+      size_t listIndex = 0;
+      result = consumeValueAlreadyCheckedIndex(NoConstructContext.instance, parenList.objects, &listIndex, undoOnCertainConditions).unconst;
+      if(listIndex == 0) {
+	(*index)--; // rewind
+	return ConstructResult(null);
+      }
+      if(listIndex < parenList.objects.length) {
+	if(undoOnCertainConditions) {
+	  (*index)--; // rewind
+	  return ConstructResult(null);
+	}
+	throw semanticError(parenList.lineNumber, "parenList had multiple items while matching it for a non-raw node in a construct");
+      }
+      return result;
     }
 
     //

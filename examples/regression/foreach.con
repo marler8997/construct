@@ -69,15 +69,15 @@ expectFail {
   foreach (item in true) {}
 }
 
-foreach (item in ("first" "second")) {
+foreach (item in makeList("first" "second")) {
   message "foreach: " item;
 }
-foreach (index, item in ("first" "second")) {
+foreach (index, item in makeList("first" "second")) {
   message "foreach[" index "] " item;
 }
 
 {
-  let items ("first" "second");
+  let items makeList("first" "second");
   foreach (item in items) {
     message "foreach: " item;
   }
@@ -86,7 +86,7 @@ foreach (index, item in ("first" "second")) {
   }
 }
 
-defcon printList(items parenList) {
+defcon printList(items raw parenList) {
   foreach(index, item in items) {
     message "foreach[" index "] " item;
   }

@@ -410,6 +410,12 @@ void generatePatternConstructCode(PureStringSink sink, const(ConstructName) symb
   generateConstructCode(sink, symbolAndName, [ConstructPatternHandler.fromPattern(patternCode, handlerCode)]);
 }
 
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("import"), `(isRelative optional raw "relative", name string)`, q{
+  //processor.findAndImport(constructSymbol.lineNumber, name.toUtf8);
+  processor.import_(constructSymbol.lineNumber, isRelative !is null, name.toUtf8);
+  return ConstructResult(null);
+}));
+
 //
 // More extended primitives
 // These primitives have patterns that rely on the basic primitives
@@ -425,10 +431,8 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("letset"), "(
   processor.letSetSymbol(name.value, value);
   return const ConstructResult((break_ is null) ? value : null);
 }));
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("import"), `(isRelative optional raw "relative", name string)`, q{
-  //processor.findAndImport(constructSymbol.lineNumber, name.toUtf8);
-  processor.import_(constructSymbol.lineNumber, isRelative !is null, name.toUtf8);
-  return ConstructResult(null);
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("makeList"), "(list raw parenList)", q{
+      return const ConstructResult(list);
 }));
 mixin(formattedString!(generatePatternConstructCode)(ConstructName("exec"), "(code constructBlock)", q{
   // TODO: should the return action be swallowed or propogate up?
@@ -454,7 +458,7 @@ mixin(formattedString!(generateConstructCode)
      return null;
      +/
   }), ConstructPatternHandler.fromPattern
-				 ("(name raw symbol, patternList parenList, implementation constructBlock)", q{
+				 ("(name raw symbol, patternList raw parenList, implementation constructBlock)", q{
 
     ConstructAttributes attributes;
     auto processedPattern = processPattern(processor, definition, patternList.objects, patternList.lineNumber);
@@ -614,7 +618,7 @@ mixin(formattedString!(generatePatternConstructCode)(ConstructName("!=", "NotEqu
 }));
 
 
-mixin(formattedString!(generatePatternConstructCode)(ConstructName("assert"), "(predicate bool)", q{
+mixin(formattedString!(generatePatternConstructCode)(ConstructName("assert"), "(predicate bool, _ raw \";\")", q{
       if(!predicate.value) {
 	throw new ConstructAssertException(constructSymbol.lineNumber, processor, "assertion failed");
       }

@@ -1,0 +1,10 @@
+import relative "../util"
+
+
+
+defcon matchUint(value uint)
+{
+}
+
+// 3 is a ConstructIntegerLiteral, make sure it matches a uint
+//matchUint 3

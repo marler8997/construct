@@ -2,20 +2,26 @@
 // Enables Syntax Highlighting for github and emacs
 
 message "3  : " 3;
-assert 3 == 3
+assert 3 == 3;
 
 message "1+2: " 1+2;
-assert 1+2 == 3
+assert 1+2 == 3;
 
 message "2*3: " 2*3;
-assert 2*3 == 6
+assert 2*3 == 6;
 
 message "2*3+4: " 2*3+4;
-assert 2*3+4 == 10
+assert 2*3+4 == 10;
 
 message "2+3*4: " 2+3*4;
-assert 2+3*4 == 14
+assert 2+3*4 == 14;
 
 message "2+3*4*2: " 2+3*4*2;
-assert 2+3*4*2 == 26
+assert 2+3*4*2 == 26;
+
+// Using parenthesis
+message "(3) : " (3);
   
+//message "(2+3)*4: " (2+3)*4;
+//assert (2+3)*4 == 14;
+

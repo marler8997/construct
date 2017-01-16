@@ -1,11 +1,11 @@
 import relative "../util"
 
 // Note: we are in pattern mode firstMatch
-assert getPatternMode == "firstMatch"
+assert getPatternMode == "firstMatch";
 
 defcon assertValue(x)
 {
-  assert x == 3
+  assert x == 3;
 }
 
 assertValue 3
@@ -16,7 +16,7 @@ expectFail {
 {
   defcon assertValue(x)
   {
-    assert x == 4
+    assert x == 4;
   }
   assertValue 4
 }

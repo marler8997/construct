@@ -1,6 +1,5 @@
 // -*-mode: c;-*-
 // Enables Syntax Highlighting for github and emacs
-
 import "regression/import"
 import "regression/setlet"
 import "regression/basics"
@@ -9,6 +8,8 @@ import "regression/patterns"
 import "regression/defcon"
 import "regression/foreach"
 import "regression/return"
+import "regression/parens"
+import "regression/implicitConversion"
 import "regression/ops"
 import "regression/classes"
 import "regression/statementModes"
