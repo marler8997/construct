@@ -536,8 +536,119 @@ class InternalPatternConstructDefinition : PatternConstructDefinition
   }
 }
 
+/*
+What is a type?
+
+An "interface type" is just a set of operations.  In construct all operations are really just
+constructs.  So if I define a construct:
+
+defcon + (this number, right number)
+
+Then the operation '+' is defined for the type "number".  So any type that
+implements the "number" interface type will also suppor the "+" operation.
+
+Note that a type can implement any number of "interface" types.
+
+I could make a special type, let's call it "literal" that implements the "number" type
+and also the "string" type.
+
+Then there is also a "concrete" type which means that the type includes size/alignment and
+a set of valid values. So a "concrete" type is also an interface type that also has
+size/alignment and set of valid values.
+
+Unlike an "interface" types, a subtype can only inherit from 1 "concrete" type.
+Inheriting from another concrete type means that the sub-type's size will be less than
+or equal to the parent types size and it's set of valid values will be a subset of the parent types.
+
+Implicit conversions are needed when you want to use one type, say type A, as a "concrete" type, say
+type B, and type A is not an descendant of type B.  For example, say you wanted to use an integerLiteral
+as an int.  Since "int" is a concrete type, and "integerLiteral" is not a descendant of "int", then
+an implicit conversion needs to be defined.
+
+I may also want to define some special types of inheritance.
+If a concrete type inherits from another concrete type, and it is basically the same thing
+except it has less bits, this may be a special kind of inheritance.
+
+...
+
+
+I think these things might mean something different depending on the type.
+
+There are different kinds of types.  Some types may have an unspecified size/alignment
+or an unspecified set of values.  These types only have a set of permitted operations.
+So really they are just "interface" types.  The "number" type would be an example
+of an "interface" type.
+
+The "int" type is a signed 32-bit integer in 2's complement, which means it has
+a size/alignment and a set of valid values so this is a "concrete" type (maybe "concrete"
+is a good word? Maybe there's a better word?).
+
+An "integer literal" is a concrete type.
+
+Some ideas:
+
+It's probably a good idea to only allow inheritance from 1 concrete type.
+And inheriting from the concrete type means you are inheriting it's size and
+value restrictions, meaning your sub-type will be a subset of the parent types
+size and values.
+
+You should be able to implement any amount of interface types.
+
+The "integer literal" should implement the "integer" interface type.
+It should also have implicit conversions to the concrete integer types.
+
+
+
+
+
+
+*/
+
+
+/*
+
+An implicit conversion needs
+* A source type
+* A target type
+* A value check function that checks whether whether a value is valid.
+  This function could return things like whether it will cause overflow.
+* A conversion function
+*/
+
+
+enum ConversionStatus {
+  good, overflow,
+}
+class ImplicitConversion
+{
+  //const(ConstructType) sourceType;
+  //const(ConstructType) targetType;
+  abstract immutable(ConstructType) getTargetType(immutable(ConstructType) sourceType);
+  abstract ConversionStatus checkValue(const(ConstructObject) obj);
+  abstract ConstructObject convert(const(ConstructObject) obj);
+}
+class NoConversion : ImplicitConversion
+{
+  public immutable instance = new NoConversion();
+  private this() { }
+  immutable(ConstructType) getTargetType(immutable(ConstructType) sourceType)
+  {
+    return sourceType;
+  }
+  ConversionStatus checkValue(const(ConstructObject) obj)
+  {
+    return ConversionStatus.good;
+  }
+  ConstructObject convert(const(ConstructObject) obj)
+  {
+    return obj;
+  }
+}
+
 abstract class ConstructType : ConstructObject
 {
+  ImplicitConversion[] implicitConversions;
+  
   this(size_t lineNumber) pure
   {
     super(lineNumber);
@@ -561,7 +672,24 @@ abstract class ConstructType : ConstructObject
   @property abstract PrimitiveTypeEnum asPrimitive() const pure;
   @property final override inout(ConstructType) tryAsConstructType() inout { return this; }
 
-  abstract bool supportsValue(const(ConstructObject) obj) const pure;
+  // returns true if the given object if of this type,
+  // or inherits from this type.
+  abstract bool isChildType(const(ConstructType) type) const pure;
+  
+  ImplicitConversion getConversionToChildTypeOf(const(ConstructType) targetType) const pure
+  {
+    if(isChildType(targetType)) {
+      return NoConversion.instance;
+    }
+    foreach(conversion; implicitConversions) {
+      auto conversionType = conversion.getTargetType(getType());
+      if(conversionType.canBe(targetType)) {
+        return conversion;
+      }
+    }
+    return null;
+  }
+
   abstract TypeMatch matchValue(const(ConstructObject) obj) const;
 }
 class PrimitiveType : ConstructType
@@ -596,9 +724,13 @@ class PrimitiveType : ConstructType
 
   @property final override PrimitiveTypeEnum asPrimitive() const pure { return typeEnum; }
 
-  final override bool supportsValue(const(ConstructObject) obj) const pure
+  final override bool isChildType(const(ConstructType) otherType) const pure
   {
-    return obj.primitiveTypeEnum.canBe(typeEnum);
+    return otherType.canBe(typeEnum);
+  }
+  final override ImplicitConversion getConversionTo(const(ConstructType) targetType) const pure
+  {
+    
   }
   final override TypeMatch matchValue(const(ConstructObject) obj) const
   {
@@ -684,10 +816,10 @@ class KeywordType : ConstructType
   @property final override string internalValueClass() const pure { return "ConstructSymbol";  }
 
   @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.symbol; }
-  final override bool supportsValue(const(ConstructObject) obj) const pure
+  final override bool isChildType(const(ConstructType) otherType) const pure
   {
-    auto symbol = obj.tryAsConstructSymbol;
-    return symbol && symbol.value == keyword;
+    auto otherKeywordType = otherType.tryAsKeywordType;
+    return otherKeywordType && this.keyword == otherKeywordType.keyword;
   }
   final override TypeMatch matchValue(const(ConstructObject) obj) const
   {
@@ -757,9 +889,9 @@ class ConstructUserDefinedType : ConstructType
     //return typeEnum;
   }
 
-  final override bool supportsValue(const(ConstructObject) obj) const pure
+  final override bool isChildType(const(ConstructType) otherType) const pure
   {
-    throw imp("ConstructUserDefinedType supportsValue");
+    throw imp("ConstructUserDefinedType isChildType");
     //return obj.primitiveTypeEnum.canBe(typeEnum);
   }
   final override TypeMatch matchValue(const(ConstructObject) obj) const
@@ -825,7 +957,7 @@ class ConstructPattern : ConstructType
   @property final override string internalValueClass() const pure { return "ConstructPattern";  }
 
   @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.constructPattern; }
-  final override bool supportsValue(const(ConstructObject) obj) const pure
+  final override bool isChildType(const(ConstructType) otherType) const pure
   {
     throw imp();
   }
@@ -850,7 +982,7 @@ class ConstructClassDefinition : ConstructType
   Scope scope_;
   this(size_t lineNumber, string name, Scope scope_) pure
   {
- super(lineNumber);
+    super(lineNumber);
     this.name = name;
     this.scope_ = scope_;
   }
@@ -873,7 +1005,7 @@ class ConstructClassDefinition : ConstructType
   }
   @property final override inout(ConstructClassDefinition) tryAsConstructClassDefinition() inout pure { return this; }
 
-  final override bool supportsValue(const(ConstructObject) obj) const pure
+  final override bool isChildType(const(ConstructType) otherType) const pure
   {
     throw imp();
   }
@@ -951,7 +1083,7 @@ class ConstructTypedListType : ConstructType
   //@property final override string internalValueClassIfOptional() const pure { return "ConstructList";  }
   @property final override string internalValueClass() const pure { return "ConstructList";  }
   @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.list; }
-  final override bool supportsValue(const(ConstructObject) obj) const pure
+  final override bool isChildType(const(ConstructType) otherType) const pure
   {
     throw imp();
   }
@@ -999,7 +1131,7 @@ class ConstructOptionalOf : ConstructType
 
   @property final override PrimitiveTypeEnum asPrimitive() const pure { return PrimitiveTypeEnum.optionalValue; }
 
-  final override bool supportsValue(const(ConstructObject) obj) const pure
+  final override bool isChildType(const(ConstructType) otherType) const pure
   {
     throw imp();
     //return obj.primitiveTypeEnum.canBe(typeEnum);
