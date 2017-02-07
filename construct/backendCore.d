@@ -127,7 +127,7 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
    PrimitiveTypeDefinition("ubyte"    , PrimitiveTypeEnum.ubyte_   , PrimitiveTypeEnum.unsigned_, PrimitiveType.ubyte_  , "ConstructUbyte"),
    PrimitiveTypeDefinition("uni"      , PrimitiveTypeEnum.uni      , PrimitiveTypeEnum.anything),
 
-   PrimitiveTypeDefinition("construct"     , PrimitiveTypeEnum.construct     , PrimitiveTypeEnum.anything, null, "ConstructDefinition"),
+   PrimitiveTypeDefinition("construct"     , PrimitiveTypeEnum.construct     , PrimitiveTypeEnum.anything, PrimitiveType.construct, "ConstructDefinition"),
 
    
    PrimitiveTypeDefinition("constructList", PrimitiveTypeEnum.constructList, PrimitiveTypeEnum.anything, PrimitiveType.constructList, "ConstructList"),
@@ -138,7 +138,7 @@ immutable PrimitiveTypeDefinition[] primitiveTypes =
 
    PrimitiveTypeDefinition("tuple"         , PrimitiveTypeEnum.tuple, PrimitiveTypeEnum.anything, PrimitiveType.tuple, "ConstructTuple"),
 
-   PrimitiveTypeDefinition("constructPattern", PrimitiveTypeEnum.constructPattern, PrimitiveTypeEnum.type, null, "ConstructPattern"),
+   PrimitiveTypeDefinition("constructPattern", PrimitiveTypeEnum.constructPattern, PrimitiveTypeEnum.constructPattern, PrimitiveType.constructPattern, "ConstructPattern"),
    PrimitiveTypeDefinition("class"           , PrimitiveTypeEnum.class_          , PrimitiveTypeEnum.nullable, PrimitiveType.class_, "ConstructClass"),
 
    // An array is a contiguous sequence of elements.
@@ -348,14 +348,65 @@ struct ConstructResult
   @property bool hasAction() const pure nothrow @nogc @safe { return this.action != Action.none; }
 }
 
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//
+// TODO: CHECK if this type is still needed after finishing the
+// changes to support changes to PatternObjectOrSize
+//
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+/*
 union ObjectOrSize
 {
   const(ConstructObject) obj;
   size_t size;
-  const(ConstructResult.Action) action;
   this(const(ConstructObject) obj)
   {
     this.obj = obj;
+  }
+  this(size_t size)
+  {
+    this.size = size;
+  }
+  this(const(ConstructResult.Action) action)
+  {
+    this.action = action;
+  }
+}
+*/
+struct PatternObject
+{
+  const(ConstructObject) originalValue;
+  const(ImplicitConversion) conversion;
+}
+union PatternObjectOrSize
+{
+  PatternObject obj;
+  size_t size;
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  // TODO: Why is this action field here? Is it supposed to be here?
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  const(ConstructResult.Action) action;
+  this(PatternObject obj)
+  {
+    this.obj = obj;
+  }
+  this(const (ConstructObject) value, const(ImplicitConversion) conversion)
+  {
+    this.obj = PatternObject(value, conversion);
   }
   this(size_t size)
   {
@@ -379,7 +430,7 @@ enum SizesMatch = ObjectOrSize.sizeof == ConstructObject.sizeof;
 //   case "many" and "oneOrMore": the number of values, followed by those values
 alias ConstructHandler = const(ConstructResult) function
   (ConstructProcessor* processor, const(ConstructDefinition) definition, const(ConstructSymbol) constructSymbol,
-   Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] args);
+   Object handlerObject, const(PatternNode)[] patternNodes, const(PatternObjectOrSize)[] args);
 
 struct PatternHandler
 {
@@ -434,7 +485,12 @@ class ConstructDefinition : ConstructObject, IConstructContext
 
   mixin finalTypeNameMembers!"construct";
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.construct);
-
+  @property override immutable(ConstructType) type() const pure
+  {
+    return PrimitiveType.construct;
+  }
+  
+  
   @property abstract bool hasOperatorPatterns() const;
   string getConstructName() const
   {
@@ -623,31 +679,32 @@ class ImplicitConversion
 {
   //const(ConstructType) sourceType;
   //const(ConstructType) targetType;
-  abstract immutable(ConstructType) getTargetType(immutable(ConstructType) sourceType);
-  abstract ConversionStatus checkValue(const(ConstructObject) obj);
-  abstract ConstructObject convert(const(ConstructObject) obj);
+  abstract immutable(ConstructType) getTargetType(immutable(ConstructType) sourceType) const;
+  abstract ConversionStatus checkValue(const(ConstructObject) obj) const;
+  abstract const(ConstructObject) convert(const(ConstructObject) obj) const;
 }
 class NoConversion : ImplicitConversion
 {
-  public immutable instance = new NoConversion();
-  private this() { }
-  immutable(ConstructType) getTargetType(immutable(ConstructType) sourceType)
+  //public immutable instance = new NoConversion();
+  this() immutable { }
+  override immutable(ConstructType) getTargetType(immutable(ConstructType) sourceType) const
   {
     return sourceType;
   }
-  ConversionStatus checkValue(const(ConstructObject) obj)
+  override ConversionStatus checkValue(const(ConstructObject) obj) const
   {
     return ConversionStatus.good;
   }
-  ConstructObject convert(const(ConstructObject) obj)
+  override const(ConstructObject) convert(const(ConstructObject) obj) const
   {
     return obj;
   }
 }
+immutable noConversion = new immutable NoConversion();
 
 abstract class ConstructType : ConstructObject
 {
-  ImplicitConversion[] implicitConversions;
+  immutable(ImplicitConversion)[] implicitConversions;
   
   this(size_t lineNumber) pure
   {
@@ -656,6 +713,10 @@ abstract class ConstructType : ConstructObject
 
   mixin virtualTypeNameMembers!"type";
   mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.type);
+  final @property override immutable(ConstructType) type() const pure
+  {
+    return PrimitiveType.type;
+  }
 
   @property abstract string tryAsKeyword() const pure;
 
@@ -675,14 +736,23 @@ abstract class ConstructType : ConstructObject
   // returns true if the given object if of this type,
   // or inherits from this type.
   abstract bool isChildType(const(ConstructType) type) const pure;
-  
-  ImplicitConversion getConversionToChildTypeOf(const(ConstructType) targetType) const pure
+
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  // TODO: change this to pass the object, not just the object's type
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  immutable(ImplicitConversion) getConversionToChildTypeOf(const(ConstructType) targetType) const
   {
     if(isChildType(targetType)) {
-      return NoConversion.instance;
+      return noConversion;
     }
     foreach(conversion; implicitConversions) {
-      auto conversionType = conversion.getTargetType(getType());
+      auto conversionType = conversion.getTargetType(type());
       if(conversionType.canBe(targetType)) {
         return conversion;
       }
@@ -728,10 +798,6 @@ class PrimitiveType : ConstructType
   {
     return otherType.canBe(typeEnum);
   }
-  final override ImplicitConversion getConversionTo(const(ConstructType) targetType) const pure
-  {
-    
-  }
   final override TypeMatch matchValue(const(ConstructObject) obj) const
   {
     if(obj.primitiveTypeEnum == typeEnum) {
@@ -767,6 +833,7 @@ class PrimitiveType : ConstructType
   static immutable nullable       = new PrimitiveType(0, PrimitiveTypeEnum.nullable);
   static immutable optionalValue  = new PrimitiveType(0, PrimitiveTypeEnum.optionalValue);
   static immutable type           = new PrimitiveType(0, PrimitiveTypeEnum.type);
+  static immutable construct      = new PrimitiveType(0, PrimitiveTypeEnum.construct);
   static immutable constructList   = new PrimitiveType(0, PrimitiveTypeEnum.constructList);
   static immutable constructDelimitedList = new PrimitiveType(0, PrimitiveTypeEnum.constructDelimitedList);
   static immutable constructBlock         = new PrimitiveType(0, PrimitiveTypeEnum.constructBlock);
@@ -777,6 +844,7 @@ class PrimitiveType : ConstructType
   static immutable class_         = new PrimitiveType(0, PrimitiveTypeEnum.class_);
   static immutable statementMode  = new PrimitiveType(0, PrimitiveTypeEnum.statementMode);
   static immutable patternNode    = new PrimitiveType(0, PrimitiveTypeEnum.patternNode);
+  static immutable constructPattern = new PrimitiveType(0, PrimitiveTypeEnum.constructPattern);
 }
 
 class KeywordType : ConstructType
@@ -1206,6 +1274,10 @@ class ConstructNullable : ConstructPredicate
 
   mixin virtualTypeNameMembers!"nullable";
   mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.nullable);
+  final @property override immutable(ConstructType) type() const pure
+  {
+    return PrimitiveType.nullable;
+  }
 
   @property final override inout(ConstructNullable) tryAsConstructNullable() inout pure { return this; }
   @property final override bool isTrue() const { return !isNull; }
@@ -1262,6 +1334,10 @@ class ConstructOptionalValue : ConstructObject
   //       abstract method would allow an easy way to get the type string
   mixin finalTypeNameMembers!"optionalValue";
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.optionalValue);
+  @property override immutable(ConstructType) type() const pure
+  {
+    throw imp("ConstructOptionalValue.type()");
+  }
 
   @property final override inout(ConstructOptionalValue) tryAsConstructOptionalValue() inout pure { return this; }
 
@@ -1317,6 +1393,10 @@ class ConstructBool : ConstructPredicate
 
   mixin finalTypeNameMembers!"bool";
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.bool_);
+  @property override immutable(ConstructType) type() const pure
+  {
+    return PrimitiveType.bool_;
+  }
 
   enum processorValueType = "ConstructBool";
 
@@ -1381,6 +1461,10 @@ class ConstructInteger : ConstructNumber
 
   mixin virtualTypeNameMembers!"integer";
   mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.integer);
+  @property override immutable(ConstructType) type() const pure
+  {
+    return PrimitiveType.integer;
+  }
 
   enum processorValueType = "ConstructInteger";
   @property final override inout(ConstructInteger) tryAsConstructInteger() inout pure { return this; }
@@ -1615,7 +1699,11 @@ class ConstructStatementMode : ConstructObject
 
   mixin finalTypeNameMembers!"statementMode";
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.statementMode);
-
+  @property override immutable(ConstructType) type() const pure
+  {
+    throw imp("ConstructStatementMode.type()");
+  }
+  
   enum processorValueType = "ConstructStatementMode";
 
   @property final override inout(ConstructStatementMode) tryAsConstructStatementMode() inout pure { return this; }
@@ -1655,6 +1743,10 @@ class ConstructPatternNode : ConstructObject
 
   mixin finalTypeNameMembers!"patternNode";
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.patternNode);
+  @property override immutable(ConstructType) type() const pure
+  {
+    return PrimitiveType.constructPattern;
+  }
 
   enum processorValueType = "ConstructPatternNode";
 

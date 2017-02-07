@@ -748,10 +748,10 @@ struct ConstructProcessor
 	scope(exit) {
 	  statementMode = saveStatementMode;
 	}
-	ObjectOrSize[3] args;
-	args[0] = ObjectOrSize(0);
-	args[1] = ObjectOrSize(result.object);
-	args[2] = ObjectOrSize(result.action);
+	PatternObjectOrSize[3] args;
+	args[0] = PatternObjectOrSize(0);
+	args[1] = PatternObjectOrSize(result.object);
+	args[2] = PatternObjectOrSize(result.action);
 	auto statementHandler = saveStatementMode.handlerConstruct.noOpPatternHandlers[0];
 	auto statementHandlerResult = statementHandler.handler(&this, saveStatementMode.handlerConstruct,
 							       null,
@@ -839,9 +839,9 @@ struct ConstructProcessor
           }
         } else {
           if(node.countType == CountType.optional) {
-            argumentBuilder.put(ObjectOrSize(null));
+            argumentBuilder.put(PatternObjectOrSize(null, null));
           } else if(node.countType == CountType.many) {
-            argumentBuilder.put(ObjectOrSize(0));
+            argumentBuilder.put(PatternObjectOrSize(0));
           } else {
 	    //logDev("  matchPattern: not a match 2");
             return false;
@@ -888,10 +888,8 @@ struct ConstructProcessor
 
       // todo: handle returns
 
-      // TODO: somehow here we should handle implicit conversions,
-      //       start by implementing a conversion from ConstructIntegerLiteral
-      //       to all the other integer types.
-      if(!node.type.supportsValue(value)) {
+      ImplicitConversion conversion = value.type.getConversionToChildTypeOf(node.type).unconst;
+      if(!conversion) {
         // NOTE: this block same as the *index >= objects.length block
         if(node.name == "_") {
           if(!node.countType.isOptional) {
@@ -900,9 +898,9 @@ struct ConstructProcessor
           }
         } else {
           if(node.countType == CountType.optional) {
-            argumentBuilder.put(ObjectOrSize(null));
+            argumentBuilder.put(PatternObjectOrSize(null, null));
           } else if(node.countType == CountType.many) {
-            argumentBuilder.put(ObjectOrSize(0));
+            argumentBuilder.put(PatternObjectOrSize(0));
           } else {
             //logDev("  matchPattern: not a match 3 (node is '%s' object is '%s' (type=%s))", node, value, value.typeName);
             return false; // not a match
@@ -916,25 +914,25 @@ struct ConstructProcessor
 
       if(node.countType == CountType.one) {
         if(node.name != "_") {
-          argumentBuilder.put(ObjectOrSize(value));
+          argumentBuilder.put(PatternObjectOrSize(value, conversion));
         }
         continue PATTERN_NODE_LOOP;
       }
       if(node.countType == CountType.optional) {
         if(node.name != "_") {
           //appendArg(new ConstructOptionalValue(value.lineNumber, value));
-          argumentBuilder.put(ObjectOrSize(value));
+          argumentBuilder.put(PatternObjectOrSize(value, conversion));
         }
         continue PATTERN_NODE_LOOP;
       }
 
-      ObjectOrSize* sizeReference = null;
+      PatternObjectOrSize* sizeReference = null;
       if(node.name != "_") {
         sizeReference = argumentBuilder.getReferenceAndMoveNext();
       }
       size_t nodeArgumentCount = 0;
       while(true) {
-        argumentBuilder.put(ObjectOrSize(value));
+        argumentBuilder.put(PatternObjectOrSize(value, conversion));
         nodeArgumentCount++;
 
         if(nextIndex >= objects.length) {
@@ -967,7 +965,8 @@ struct ConstructProcessor
           break;
         }
 
-        if(!node.type.supportsValue(value)) {
+	conversion = value.type.getConversionToChildTypeOf(node.type).unconst;
+	if(!conversion) {
           break;
         }
         //logDev("    matcher '%s' matched '%s'", node, value);
@@ -983,25 +982,25 @@ struct ConstructProcessor
 
   struct PatternMatchStorage(size_t stackSize)
   {
-    ObjectOrSize[stackSize] stackBuffer;
+    PatternObjectOrSize[stackSize] stackBuffer;
     size_t totalSize;
-    void put(const(ObjectOrSize) objOrSize)
+    void put(const(PatternObjectOrSize) objOrSize)
     {
       if(totalSize >= stackSize) {
         throw imp("PatternMatchStorage not big enough");
       }
       stackBuffer[totalSize++] = objOrSize;
     }
-    ObjectOrSize* getReferenceAndMoveNext()
+    PatternObjectOrSize* getReferenceAndMoveNext()
     {
       if(totalSize >= stackSize) {
         throw imp("PatternMatchStorage not big enough");
       }
-      ObjectOrSize* next = &stackBuffer[totalSize];
+      PatternObjectOrSize* next = &stackBuffer[totalSize];
       totalSize++;
       return next;
     }
-    @property ObjectOrSize[] data()
+    @property PatternObjectOrSize[] data()
     {
       return stackBuffer[0..totalSize];
     }
@@ -1018,7 +1017,7 @@ struct ConstructProcessor
 
     size_t appendStartIndex;
     if(hasOperatorObject) {
-      args.put(ObjectOrSize(opParam));
+      args.put(PatternObjectOrSize(opParam, noConversion));
       appendStartIndex = 1;
     } else {
       appendStartIndex = 0;
@@ -1343,7 +1342,7 @@ class FunctionConstructDefinition : NoPatternConstruct
 }
 const(ConstructResult) handleConstructWithBlock
 (ConstructProcessor* processor, const(ConstructDefinition) definition, const(ConstructSymbol) constructSymbol,
- Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] args)
+ Object handlerObject, const(PatternNode)[] patternNodes, const(PatternObjectOrSize)[] args)
 {
   auto block = cast(const(ConstructBlock))handlerObject;
   assert(block, "code bug: handlerObject is not a ConstructBlock");
@@ -1530,7 +1529,7 @@ class StringAllocConstructDefinition : ConstructDefinition
 }
 */
 +/
-void printPatternArguments(const(PatternNode)[] patternNodes, const(ObjectOrSize)[] args)
+void printPatternArguments(const(PatternNode)[] patternNodes, const(PatternObjectOrSize)[] args)
 {
   logDev("--- Pattern Arguments -----------------------------");
   size_t argIndex = 0;

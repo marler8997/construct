@@ -23,21 +23,21 @@ import backend : loadConstructBackend, importBackendPackage, loadBackendType;
 // because these patterns are required to create other patterns.
 //
 const(ConstructResult) falseHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
-				    Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
+				    Object handlerObject, const(PatternNode)[] patternNodes, const(PatternObjectOrSize)[] objects) pure
 {
   return ConstructResult(new ConstructBool(constructSymbol.lineNumber, false));
 }
 immutable falseConstructDefinition = new immutable InternalPatternConstructDefinition
   ("false", [immutable PatternHandler(&falseHandler, null, null)], null, ConstructAttributes.init, null);
 const(ConstructResult) trueHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
-                                   Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
+                                   Object handlerObject, const(PatternNode)[] patternNodes, const(PatternObjectOrSize)[] objects) pure
 {
   return ConstructResult(new ConstructBool(constructSymbol.lineNumber, true));
 }
 immutable trueConstructDefinition = new immutable InternalPatternConstructDefinition
   ("true", [immutable PatternHandler(&trueHandler, null, null)], null, ConstructAttributes.init, null);
 const(ConstructResult) nullHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
-                                   Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
+                                   Object handlerObject, const(PatternNode)[] patternNodes, const(PatternObjectOrSize)[] objects) pure
 {
   return ConstructResult(new ConstructNull(constructSymbol.lineNumber));
 }
@@ -45,7 +45,7 @@ immutable nullConstructDefinition = new immutable InternalPatternConstructDefini
   ("null", [immutable PatternHandler(&nullHandler, null, null)], null, ConstructAttributes.init, null);
 
 const(ConstructResult) commaHandler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
-                                   Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
+                                   Object handlerObject, const(PatternNode)[] patternNodes, const(PatternObjectOrSize)[] objects) pure
 {
   return const ConstructResult(constructSymbol);
 }
@@ -58,7 +58,7 @@ struct ListOfConstruct
 {
   private static const(ConstructResult) handler(ConstructProcessor* processor, const(ConstructDefinition) def,
                                                 const(ConstructSymbol) constructSymbol, Object handlerObject,
-                                                const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
+                                                const(PatternNode)[] patternNodes, const(PatternObjectOrSize)[] objects) pure
 
   {
     assert(objects.length == 1);
@@ -84,7 +84,7 @@ class DefaultStatementModeConstruct
     return ConstructResult(null);
   }
   private static const(ConstructResult) handler(ConstructProcessor* processor, const(ConstructDefinition) def, const(ConstructSymbol) constructSymbol,
-					 Object handlerObject, const(PatternNode)[] patternNodes, const(ObjectOrSize)[] objects) pure
+					 Object handlerObject, const(PatternNode)[] patternNodes, const(PatternObjectOrSize)[] objects) pure
   {
     assert(objects.length == 3);
     assert(objects[0].size == 0);
@@ -148,7 +148,7 @@ void genConstructHandlerSignature(PureStringSink sink, const(char)[] funcName, c
 }
 
 
-void sanityCheckConstructArgs(const(PatternNode)[] patternNodes, const(ObjectOrSize)[] args)
+void sanityCheckConstructArgs(const(PatternNode)[] patternNodes, const(PatternObjectOrSize)[] args)
 {
   //logDev("------------- sanityCheckConstructArgs --------------");
   
@@ -181,7 +181,7 @@ void sanityCheckConstructArgs(const(PatternNode)[] patternNodes, const(ObjectOrS
 }
 
 const(T)[] patternNodeArguments(T)(bool oneOrMore, size_t* runtimeArgOffset,
-                                   size_t patternNodeArgumentIndex, const(ObjectOrSize)[] args) if (is (T == class))
+                                   size_t patternNodeArgumentIndex, const(PatternObjectOrSize)[] args) if (is (T == class))
 {
   size_t nodeSizeOffset = *runtimeArgOffset + patternNodeArgumentIndex;
   assert(nodeSizeOffset < args.length); // should have already been checked by sanityCheckConstructArgs
@@ -205,7 +205,7 @@ void generateHandlerThunkFunction(PureStringSink sink, const(char)[] linePrefix,
   sink(", const(ConstructSymbol) constructSymbol");
   sink(", Object handlerObject");
   sink(", const(PatternNode)[] patternNodes");
-  sink(", const(ObjectOrSize)[] args)\n");
+  sink(", const(PatternObjectOrSize)[] args)\n");
   sink(linePrefix);
   sink("{\n");
 

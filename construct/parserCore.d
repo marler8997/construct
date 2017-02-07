@@ -10,7 +10,7 @@ import construct.patterns    : PatternNode;
 import construct.backendCore : PrimitiveTypeEnum, ConstructDefinition,
                                ConstructNumber, ConstructInteger, ConstructUnsigned, ConstructUint,
                                ConstructPredicate, ConstructBool, ConstructNullable, ConstructTuple,
-                               ConstructType, ConstructOptionalValue, ConstructList,
+                               ConstructType, KeywordType, ConstructOptionalValue, ConstructList,
                                definition, commonType, canBe,
                                ConstructPattern, ConstructClassDefinition, ConstructClass,
                                ConstructStatementMode, ConstructPatternNode,
@@ -21,6 +21,7 @@ enum ConstructClasses =
   ["ConstructObject",
    "ConstructDefinition",
    "ConstructType",
+   "KeywordType",
    "ConstructReturn",
    "ConstructOptionalValue",
    "ConstructNullable",
@@ -120,6 +121,7 @@ abstract class ConstructObject
 
   enum staticTypeName = "anything";
   @property abstract string typeName() const pure nothrow @nogc @safe;
+  @property abstract immutable(ConstructType) type() const pure;
 
   enum staticPrimitiveTypeEnum = PrimitiveTypeEnum.anything;
   @property abstract PrimitiveTypeEnum primitiveTypeEnum() const pure nothrow @nogc @safe;
@@ -158,6 +160,10 @@ class ConstructComment : ConstructObject
 
   mixin finalTypeNameMembers!"comment";
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.comment);
+  final @property override immutable(ConstructType) type() const pure
+  {
+    throw imp("ConstructComment.type");
+  }
 
   final override void toString(scope void delegate(const(char)[]) sink) const
   {
@@ -182,6 +188,10 @@ class ConstructUtf8 : ConstructString
 
   mixin finalTypeNameMembers!"utf8";
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.utf8);
+  @property override immutable(ConstructType) type() const pure
+  {
+    return PrimitiveType.utf8;
+  }
 
   @property final override inout(ConstructUtf8) tryAsConstructUtf8() inout pure { return this; }
   @property override size_t length() const
@@ -224,6 +234,10 @@ class ConstructSymbol : ConstructObject
 
   mixin finalTypeNameMembers!"symbol";
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.symbol);
+  @property override immutable(ConstructType) type() const pure
+  {
+    return PrimitiveType.symbol;
+  }
 
   enum processorValueType = "ConstructSymbol";
   @property final override inout(ConstructSymbol) tryAsConstructSymbol() inout pure { return this; }
@@ -254,6 +268,10 @@ class ConstructIntegerLiteral : ConstructInteger
 
   mixin virtualTypeNameMembers!"integerLiteral";
   mixin virtualPrimitiveTypeMembers!(PrimitiveTypeEnum.integerLiteral);
+  @property override immutable(ConstructType) type() const pure
+  {
+    return PrimitiveType.integerLiteral;
+  }
 
   enum processorValueType = "ConstructIntegerLiteral";
 
@@ -341,6 +359,10 @@ class ConstructBlock : ConstructDelimitedList
 
   mixin finalTypeNameMembers!"constructBlock";
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.constructBlock);
+  @property override immutable(ConstructType) type() const pure
+  {
+    return PrimitiveType.constructBlock;
+  }
 
   enum processorValueType = "ConstructBlock";
   @property final override inout(ConstructBlock) tryAsConstructBlock() inout pure { return this; }
@@ -354,6 +376,10 @@ class ConstructParenList : ConstructDelimitedList
 
   mixin finalTypeNameMembers!"parenList";
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.parenList);
+  @property override immutable(ConstructType) type() const pure
+  {
+    return PrimitiveType.parenList;
+  }
 
   enum processorValueType = "ConstructParenList";
   @property final override inout(ConstructParenList) tryAsConstructParenList() inout pure { return this; }
@@ -367,6 +393,10 @@ class ConstructBracketList : ConstructDelimitedList
 
   mixin finalTypeNameMembers!"constructBracketList";
   mixin finalPrimitiveTypeMembers!(PrimitiveTypeEnum.constructBracketList);
+  @property override immutable(ConstructType) type() const pure
+  {
+    return PrimitiveType.bracketList;
+  }
 
   enum processorValueType = "ConstructBracketList";
   @property final override inout(ConstructBracketList) tryAsConstructBracketList() inout pure { return this; }
